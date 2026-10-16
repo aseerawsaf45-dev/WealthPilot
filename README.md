@@ -1,61 +1,123 @@
 # WealthPilot 🧭
+
 **Sovereign Personal Wealth Workspace & Minor-Unit Precision Ledger**
 
-WealthPilot is a client-side personal financial wellness workspace engineered with mathematical precision, zero remote telemetry, autonomous runway forecasting, and verified regional merchant perks.
+WealthPilot is a private Next.js 16 application for personal finance tracking. In the current codebase, the main experience is rendered as a client-side React app (`src/app/page.tsx`) with data persisted in the browser (`localStorage`).
 
----
+## Project Overview
 
-## ✨ Key Architectural Highlights
+- **Framework**: Next.js `16.4.2` (App Router)
+- **UI**: React `19.3.0`, Tailwind CSS `4`, Lucide React icons
+- **Data model**: Minor-unit integer accounting (for example cents/poisha) for ledger math
+- **Storage model**: Local browser storage via `localStorage` (no backend API routes in `src/app/api`)
 
-- **Minor-Unit Integer Accounting**: Standard finance applications suffer from IEEE-754 binary floating-point drift (e.g. `0.1 + 0.2 = 0.30000000000000004`). WealthPilot reconciles every account balance, transaction split, and debt amortization strictly in discrete integer minor units (poisha / cents), guaranteeing 0.00% rounding drift.
-- **100% Client-Side Privacy Enclave**: Zero telemetry and zero remote database syncing. Your personal accounts, balances, salary, and memos remain safely in your browser enclave (`localStorage` and `IndexedDB`).
-- **Interactive Marketing Landing Page**: High-impact editorial design featuring live 5-year compounding sizer, survival runway velocity calculator, and comparison matrix.
-- **Client Authentication & Passkey Emulation**: Integrated Sign In and Sign Up modal with profile display naming, password strength meter, and instant demo access.
-- **Verified Regional Perks**: Dual-region merchant discounting with transparent verification links (Bangladesh `৳ BDT` & Global `$` markets).
-- **Self-Finance Learning Academy**: Gamified finance modules featuring real-world scenario simulations, interactive runway calculations, daily learning streaks (`🔥`), and XP leveling.
-- **Formula-Injection Safe CSV Engine**: Automatic neutralization against spreadsheet formula injection attacks (`=`, `+`, `-`, `@`) upon export and custom-mapped imports.
+## Prerequisites
 
----
+- **Node.js `>= 20.9.0`** (required by the locked Next.js dependency)
+- **npm** (comes with Node.js)
 
-## 🛠️ Technology Stack
+Check your versions:
 
-- **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
-- **Styling**: [TailwindCSS v4](https://tailwindcss.com/) with custom Swiss Frosted Glassmorphism
-- **Icons**: [Lucide React](https://lucide.dev/)
-- **Typography**: [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) & [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono)
-- **Testing**: [Vitest](https://vitest.dev/) (100% pass rate across core minor-unit financial math)
-
----
-
-## 🚀 Getting Started
-
-### 1. Install Dependencies
 ```bash
-npm install
+node -v
+npm -v
 ```
 
-### 2. Start Local Development Server
+If your Node.js version is older than `20.9.0`, upgrade Node before installing dependencies.
+
+## Run Locally
+
 ```bash
+git clone https://github.com/aseerawsaf45-dev/WealthPilot.git
+cd WealthPilot
+npm ci
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-- Visit `http://localhost:3000/#landing` to view the public marketing landing page.
-- Visit `http://localhost:3000/#app` to enter the private financial ledger workspace.
+Then open: [http://localhost:3000](http://localhost:3000)
 
-### 3. Run Test Suite
+> Prefer `npm ci` for reproducible installs (lockfile-based). Use `npm install` only if you intentionally need a fresh dependency resolution.
+
+## Available Scripts
+
+- `npm run dev` — start the development server
+- `npm run build` — create a production build
+- `npm run start` — run the production server (after `npm run build`)
+- `npm run lint` — run ESLint
+- `npm run test` — run Vitest (`vitest run`)
+
+## Production Build (Local)
+
 ```bash
-npm test
+npm run build
+npm run start
 ```
 
----
+Then open: [http://localhost:3000](http://localhost:3000)
 
-## 🔒 Security & Privacy Architecture
+## App Navigation / Usage Flow
 
-WealthPilot operates with zero remote telemetry. No credentials, tokens, or personal ledgers are transmitted to external servers. All cryptographic fingerprints and audit logs are recorded locally.
+The app uses a single route (`/`) and switches views using URL hash state:
 
-*Disclaimer: WealthPilot is a personal financial calculation workspace and self-directed wellness tool, not a licensed broker-dealer or registered financial advisor.*
+- `/#landing` — marketing/intro landing experience
+- `/#app` — interactive ledger workspace
 
----
+From the app workspace, use the top navigation to switch between:
 
-© 2026 WealthPilot. Built with mathematical sovereignty.
+- Overview
+- Transactions
+- Accounts
+- Budgets
+- Goals
+- Bills
+- Debt Planner
+- Learn
+- Import
+- Settings
+
+Quick actions:
+
+- **Record** button (or keyboard **N**) opens the quick transaction modal.
+- Number keys `1..0` map to tabs (`1` Overview ... `0` Settings).
+
+## Troubleshooting
+
+- **Install errors / engine mismatch**
+  - Confirm Node.js is `>= 20.9.0`.
+  - Remove `node_modules` and reinstall:
+    ```bash
+    rm -rf node_modules
+    npm ci
+    ```
+
+- **Port 3000 already in use**
+  - Run on another port:
+    ```bash
+    npm run dev -- --port 3001
+    ```
+  - Open [http://localhost:3001](http://localhost:3001)
+
+- **Stale or unexpected local data**
+  - The app persists data in `localStorage` (keys prefixed with `wealthpilot_v1_`).
+  - Clear site storage in your browser devtools, then reload.
+
+- **Production mode sanity check**
+  - Ensure `npm run build` succeeds before `npm run start`.
+
+## Security & Privacy Note
+
+This project is designed for personal finance tracking workflows and local experimentation. It should not be treated as financial, investment, tax, or legal advice.
+
+Based on the current repository structure, user ledger state is handled in-browser and persisted locally. Review the source before using with sensitive real-world data.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
+
+© 2026 WealthPilot
