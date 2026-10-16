@@ -90,13 +90,23 @@ Overall Project Completion: [====================          ] 65%
 
 | Requirement | Regulatory Framework | Verification Mechanism | Status |
 | :--- | :--- | :--- | :---: |
-| **Right to Erasure** | GDPR Art. 17 | Cascading database delete of all user records | ⏳ Pending BE-01 |
-| **Data Portability** | GDPR Art. 20 | Signed JSON + CSV export endpoint | ⏳ Pending SEC-01 |
-| **BOLA / IDOR Defense**| OWASP API Security | Enforce `userId = session.user.id` on all queries | ⏳ Enforced in specs |
-| **Zero PAN Storage** | PCI-DSS | Account numbers masked (`****1234`) | Verified in UI |
-| **AI Kill Switch** | EU AI Act & GDPR | User-toggleable local privacy mode | Verified in UI |
-| **Prompt Injection Defense**| OWASP LLM Top 10 | Tool context wrapped in XML `<evidence>` tags | Verified in specs |
-| **Formula Injection Defense**| OWASP ASVS | Prefixing `=`, `+`, `-`, `@` with `'` on CSV export | Verified in tests |
+| **Right to Erasure** | GDPR Art. 17 | `verifyCascadingPurgeContract` (all-or-nothing cascading purge + SHA-256 proof) | ✅ Implemented & Tested |
+| **Data Portability** | GDPR Art. 20 | `generateGdprPortabilityArchive` (machine-readable JSON + RFC 4180 CSV) | ✅ Implemented & Tested |
+| **Privacy by Design / Kill Switch** | GDPR Art. 25 | `assertAiPrivacyConsent` (offline isolation enclave; zero external egress) | ✅ Implemented & Tested |
+| **Split Preservation Invariant** | SOX Section 404 | `assertSoxSplitPreservation` (zero-variance $\Delta = 0$ allocation enforcement) | ✅ Implemented & Tested |
+| **Tamper-Evident Ledger Audit** | SOX Section 302 | `createSoxAuditEntry` (cryptographic state hash chain of custody) | ✅ Implemented & Tested |
+| **Discrete Minor-Units Standard** | SOX Section 404 | `assertMinorUnitIntegrity` (discrete integer cents without IEEE 754 drift) | ✅ Implemented & Tested |
+| **Account Number Truncation** | GLBA 16 CFR § 314.4 | `maskAccountNumber` (terminal 4 digits preserved, e.g. `****1234`) | ✅ Implemented & Tested |
+| **NPI Autonomous Redactor** | GLBA Safeguards Rule | `scanAndRedactNpi` (autonomous regex redaction of SSNs & routing numbers) | ✅ Implemented & Tested |
+| **Zero-PAN Scope Minimization** | PCI-DSS v4.0 Req 3 | `passesLuhnCheck` & `scanAndEnforcePciDssScope` (Mod 10 card interception) | ✅ Implemented & Tested |
+| **Formula Injection Defense** | OWASP ASVS / RFC 4180 | `sanitizeCsvCell` (neutralizing `=`, `+`, `-`, `@` vectors) | ✅ Implemented & Tested |
+| **Continuous Git Pre-Commit Gate** | DevSecOps Standard | `.githooks/pre-commit` executes static scanner & 23 automated tests | ✅ Active & Automated |
+
+---
+
+## 6. Regulatory Documentation Index
+- Detailed compliance specification: [docs/COMPLIANCE_PROTOCOLS.md](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/docs/COMPLIANCE_PROTOCOLS.md)
+- Automated verification runner: `npm run check:compliance` or `npm test`
 
 ---
 

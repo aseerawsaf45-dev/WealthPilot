@@ -22,6 +22,19 @@ import { calculateDebtPayoffSchedule } from '../src/services/debtService.ts';
 import { executeCopilotQuery, sanitizePromptInput } from '../src/services/copilotService.ts';
 import { parseCsvRaw, processCsvData, generateTransactionFingerprint } from '../src/services/importService.ts';
 import { logAuditEvent } from '../src/services/auditService.ts';
+import {
+  generateGdprPortabilityArchive,
+  verifyCascadingPurgeContract,
+  assertAiPrivacyConsent,
+  assertSoxSplitPreservation,
+  createSoxAuditEntry,
+  assertMinorUnitIntegrity,
+  maskAccountNumber,
+  scanAndRedactNpi,
+  verifyGlbaAccountMasking,
+  passesLuhnCheck,
+  scanAndEnforcePciDssScope,
+} from '../src/lib/compliance/index.ts';
 
 describe('Financial Math & Minor Units (Cents)', () => {
   it('converts dollar strings and decimals to exact integer cents without binary floating point errors', () => {
@@ -205,3 +218,117 @@ describe('AI Copilot Grounding & Adversarial Defense', () => {
     assert.strictEqual(response.evidence?.scope, 'Privacy Enforced');
   });
 });
+
+describe('GDPR (EU 2016/679) Regulatory Compliance Protocols', () => {
+  it('generates a machine-readable data portability export complying with Article 20', () => {
+    const pkg = {
+      exportedAt: new Date().toISOString(),
+      userId: 'user_gdpr_test',
+      schemaVersion: '1.0.0' as const,
+      profile: { userId: 'user_gdpr_test', preferredCurrency: 'USD', timezone: 'UTC', isAiEnabled: false },
+      accounts: [],
+      transactions: [
+        {
+          id: 'tx_1', userId: 'user_gdpr_test', accountId: 'acc_1', financialDate: '2026-10-15',
+          postedAt: '2026-10-15T00:00:00Z', merchant: 'Salary', normalizedMerchant: 'Salary',
+          category: 'Income', amountCents: 500000, currency: 'USD', status: 'cleared' as const,
+          tags: [], isTransfer: false, source: 'manual' as const,
+        },
+      ],
+      budgets: [], goals: [], debts: [],
+    };
+
+    const archive = generateGdprPortabilityArchive(pkg);
+    assert.ok(archive.jsonData.includes('user_gdpr_test'));
+    assert.ok(archive.csvData.includes('Salary'));
+    assert.ok(archive.csvData.includes('500000'));
+  });
+
+  it('verifies cascading purge eradication contract under Article 17 (Right to Erasure)', () => {
+    const confirmation = verifyCascadingPurgeContract('user_gdpr_test', {
+      accounts: 3, transactions: 154, budgets: 5, goals: 2, debts: 1, auditLogs: 42,
+    });
+    assert.strictEqual(confirmation.success, true);
+    assert.strictEqual(confirmation.recordsPurged.transactions, 154);
+    assert.ok(confirmation.cryptographicSignature.startsWith('PURGED_SHA256_'));
+  });
+
+  it('asserts privacy consent and blocks AI execution under Article 25 when AI is disabled', () => {
+    const consent = assertAiPrivacyConsent(false);
+    assert.strictEqual(consent.allowed, false);
+    assert.ok(consent.reason?.includes('GDPR Art. 25'));
+  });
+});
+
+describe('Sarbanes-Oxley Act (SOX Section 302 & 404) Compliance', () => {
+  it('enforces Section 404 split balance preservation invariant with zero variance tolerance', () => {
+    const compliant = assertSoxSplitPreservation(-10000, [
+      { amountCents: -6000, category: 'Food' },
+      { amountCents: -4000, category: 'Transport' },
+    ]);
+    assert.strictEqual(compliant.compliant, true);
+    assert.strictEqual(compliant.varianceCents, 0);
+
+    const nonCompliant = assertSoxSplitPreservation(-10000, [
+      { amountCents: -6000, category: 'Food' },
+      { amountCents: -3500, category: 'Transport' },
+    ]);
+    assert.strictEqual(nonCompliant.compliant, false);
+    assert.strictEqual(nonCompliant.varianceCents, -500);
+    assert.ok(nonCompliant.error?.includes('SOX 404 Control Breach'));
+  });
+
+  it('generates tamper-evident cryptographically hashed audit trails for financial adjustments', () => {
+    const entry = createSoxAuditEntry('auditor_1', 'TRANSACTION', 'tx_99', 'UPDATE', {
+      amountCents: 45000, note: 'Reconciled dividend',
+    });
+    assert.strictEqual(entry.soxControlId, 'SOX_404_LEDGER_MUTATION');
+    assert.strictEqual(entry.integrityVerified, true);
+    assert.ok(entry.checksumAfter.startsWith('SOX_HASH_'));
+  });
+
+  it('enforces discrete integer minor-unit standard (no raw decimal float cents)', () => {
+    assert.strictEqual(assertMinorUnitIntegrity(10050), true);
+    assert.strictEqual(assertMinorUnitIntegrity(100.50), false);
+  });
+});
+
+describe('Gramm-Leach-Bliley Act (GLBA Safeguards Rule 16 CFR Part 314)', () => {
+  it('masks account numbers to preserve strictly the terminal 4 digits', () => {
+    assert.strictEqual(maskAccountNumber('12345678901234'), '****1234');
+    assert.strictEqual(maskAccountNumber('987654321'), '****4321');
+    assert.strictEqual(maskAccountNumber('9999'), '****9999');
+    assert.strictEqual(verifyGlbaAccountMasking('****1234'), true);
+    assert.strictEqual(verifyGlbaAccountMasking('12345678'), false);
+  });
+
+  it('detects and redacts Nonpublic Personal Information (NPI) such as SSNs and bank numbers', () => {
+    const textWithNpi = 'Customer tax identifier SSN 123-45-6789 attached to account: 9876543210';
+    const scan = scanAndRedactNpi(textWithNpi);
+    assert.strictEqual(scan.hasNpiLeak, true);
+    assert.ok(scan.detectedTypes.includes('US_SSN_OR_NATIONAL_ID'));
+    assert.ok(!scan.sanitizedText.includes('123-45-6789'));
+    assert.ok(scan.sanitizedText.includes('[REDACTED_NPI_SSN]'));
+  });
+});
+
+describe('PCI-DSS v4.0 Scope Minimization & Cardholder Protection', () => {
+  it('validates card numbers using the Luhn algorithm', () => {
+    // Valid Visa test card
+    assert.strictEqual(passesLuhnCheck('4532015112830366'), true);
+    // Invalid card number (fails checksum)
+    assert.strictEqual(passesLuhnCheck('4532015112830367'), false);
+  });
+
+  it('intercepts and neutralizes raw card numbers (PAN) and CVV codes in transaction buffers', () => {
+    const rawBuffer = 'Payment processed for card 4532-0151-1283-0366 with security code cvv: 928';
+    const pciScan = scanAndEnforcePciDssScope(rawBuffer);
+    assert.strictEqual(pciScan.isCompliant, false);
+    assert.ok(pciScan.detectedViolations.some((v) => v.includes('CARDHOLDER_PAN_DETECTED')));
+    assert.ok(pciScan.detectedViolations.includes('CARD_SECURITY_CODE_CVV'));
+    assert.ok(!pciScan.sanitizedText.includes('4532-0151-1283-0366'));
+    assert.ok(!pciScan.sanitizedText.includes('cvv: 928'));
+    assert.ok(pciScan.sanitizedText.includes('[REDACTED_PCI_PAN_0366]'));
+  });
+});
+

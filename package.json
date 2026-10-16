@@ -10,6 +10,8 @@
     "test": "tsx --test scripts/test-runner.mts",
     "postinstall": "node scripts/patch-tailwind.js",
     "check:security": "node scripts/security-compliance-check.js",
+    "check:compliance": "node scripts/security-compliance-check.js",
+    "test:compliance": "npm test",
     "tracker:status": "node scripts/project-tracker.js"
   },
   "dependencies": {

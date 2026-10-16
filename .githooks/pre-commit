@@ -1,8 +1,24 @@
 #!/bin/sh
-# WealthPilot Git Pre-Commit Hook: FinTech Security & Compliance Verification
-echo "Running WealthPilot pre-commit security and compliance checks..."
+# WealthPilot Git Pre-Commit Hook: FinTech Security & Regulatory Compliance Verification
+# Shenzhen International FinTech Competition-2026 Audit Standard
+
+echo "================================================================"
+echo "🛡️  WealthPilot Pre-Commit Regulatory & Security Gate"
+echo "================================================================"
+
+echo "\n[Step 1/2] Running Regulatory Compliance Scanner (GDPR, SOX, GLBA, PCI-DSS)..."
 node scripts/security-compliance-check.js
 if [ $? -ne 0 ]; then
-  echo "Commit blocked: Please resolve security compliance errors."
+  echo "\n🚨 Commit blocked: Regulatory compliance verification failed."
   exit 1
 fi
+
+echo "\n[Step 2/2] Running Automated Financial Math & Compliance Test Suite..."
+npm test
+if [ $? -ne 0 ]; then
+  echo "\n🚨 Commit blocked: Automated compliance or invariant test failure."
+  exit 1
+fi
+
+echo "\n✅ All pre-commit security & regulatory compliance gates passed!"
+exit 0
