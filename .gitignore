@@ -56,3 +56,4 @@ WealthPilot_Build_Prompts/
 !public/**/*.png
 
 .vercel
+.neon
