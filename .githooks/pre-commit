@@ -1,0 +1,8 @@
+#!/bin/sh
+# WealthPilot Git Pre-Commit Hook: FinTech Security & Compliance Verification
+echo "Running WealthPilot pre-commit security and compliance checks..."
+node scripts/security-compliance-check.js
+if [ $? -ne 0 ]; then
+  echo "Commit blocked: Please resolve security compliance errors."
+  exit 1
+fi
