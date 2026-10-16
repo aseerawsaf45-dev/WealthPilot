@@ -12,15 +12,26 @@
     "check:security": "node scripts/security-compliance-check.js",
     "check:compliance": "node scripts/security-compliance-check.js",
     "test:compliance": "npm test",
-    "tracker:status": "node scripts/project-tracker.js"
+    "tracker:status": "node scripts/project-tracker.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/client": "6.19.3",
     "@tailwindcss/postcss": "^4.3.3",
     "lucide-react": "^1.57.0",
     "next": "16.4.2",
     "postcss": "^8.5.30",
+    "prisma": "6.19.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",

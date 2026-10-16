@@ -8,13 +8,13 @@
 ## 1. Executive Progress Dashboard
 
 ```
-Overall Project Completion: [====================          ] 65%
+Overall Project Completion: [=======================       ] 75%
 
 [X] Phase 1: UX/UI Design System & Presentation Layer          (100%)
 [X] Phase 2: Client Financial State & Deterministic Math       (100%)
 [X] Phase 2.5: Build System Hardening & Tailwind v4 Engine      (100%)
-[ ] Phase 3: PostgreSQL Database & Multi-Tenant Schema         (0%)   <-- CURRENT MILESTONE
-[ ] Phase 4: Server Route Handlers & Auth API Layer            (0%)
+[X] Phase 3: PostgreSQL Database & Multi-Tenant Schema         (100%)
+[ ] Phase 4: Server Route Handlers & Auth API Layer            (0%)   <-- CURRENT MILESTONE
 [ ] Phase 5: Free AI Copilot Tool Calling (Gemini Flash)       (0%)
 [ ] Phase 6: Statistical ML Forecasting & Outlier Detection    (0%)
 [ ] Phase 7: Regulatory Compliance Verification & Final Audit  (0%)
@@ -47,6 +47,14 @@ Overall Project Completion: [====================          ] 65%
 * [x] **Windows Path `#` Null-Byte Resolution:** Engineered automated [scripts/patch-tailwind.js](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/scripts/patch-tailwind.js) postinstall hook to sanitize `\0#` escaping in `enhanced-resolve`.
 * [x] **Cross-Origin LAN HMR Configured:** Configured `allowedDevOrigins` in [next.config.ts](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/next.config.ts) for smooth testing on mobile/network IP addresses.
 
+### 2.4 Multi-Tenant PostgreSQL Database & Invariants (100% Complete)
+* [x] **Prisma ORM 6.19.3 Production LTS:** Generated strongly typed client in [prisma/schema.prisma](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/prisma/schema.prisma).
+* [x] **GDPR Art. 17 Cascading Purge:** Foreign keys across all 10 domain entities specify `onDelete: Cascade`.
+* [x] **64-bit Minor Units:** Balance and amount fields configured as `BigInt` cents, preventing IEEE 754 float drift and currency overflow.
+* [x] **Database Singleton & Serializer:** Created [src/server/db.ts](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/src/server/db.ts) with `BigInt.prototype.toJSON` polyfill and connection health check.
+* [x] **Database Seeding Engine:** Created [prisma/seed.ts](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/prisma/seed.ts) to populate demo user, accounts, transactions, and a genesis SOX 302 audit log.
+* [x] **Multi-Tenancy Specification:** Published manual setup guide and ER diagram in [docs/DATABASE_AND_TENANCY_SPECIFICATION.md](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/docs/DATABASE_AND_TENANCY_SPECIFICATION.md).
+
 ---
 
 ## 3. Architecture Decision Records (ADRs)
@@ -77,8 +85,8 @@ Overall Project Completion: [====================          ] 65%
 
 | Priority | Task ID | Description | Target Files | Status |
 | :---: | :---: | :--- | :--- | :---: |
-| 🔴 High | **BE-01** | Create Prisma schema and connect free Supabase/Neon PostgreSQL | `prisma/schema.prisma`, `src/server/db.ts` | **Next Up** |
-| 🔴 High | **BE-02** | Implement NextAuth.js v5 authentication & session route handlers | `src/app/api/auth/[...nextauth]/route.ts` | Queued |
+| 🟢 Done | **BE-01** | Create Prisma schema, client singleton, and database seeding | `prisma/schema.prisma`, `src/server/db.ts`, `prisma/seed.ts` | **Completed** ✅ |
+| 🔴 High | **BE-02** | Implement NextAuth.js v5 authentication & session route handlers | `src/app/api/auth/[...nextauth]/route.ts` | **Next Up** |
 | 🟡 Med | **BE-03** | Migrate in-memory finance context to server Route Handlers | `src/app/api/transactions/route.ts`, `src/app/api/dashboard/route.ts` | Queued |
 | 🔴 High | **AI-01** | Implement Gemini Flash Tool-Calling copilot route handler | `src/app/api/ai/copilot/route.ts`, `src/server/ai/geminiClient.ts` | Queued |
 | 🟡 Med | **ML-01** | Implement Holt-Winters cash-flow forecasting & Z-Score anomaly API | `src/server/services/forecastService.ts`, `src/app/api/ml/*` | Queued |

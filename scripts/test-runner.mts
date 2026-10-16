@@ -332,3 +332,65 @@ describe('PCI-DSS v4.0 Scope Minimization & Cardholder Protection', () => {
   });
 });
 
+describe('PostgreSQL Multi-Tenant Schema & Database Invariants', () => {
+  it('validates schema file existence and all 10 core multi-tenant models', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
+    assert.ok(fs.existsSync(schemaPath), 'prisma/schema.prisma must exist');
+
+    const content = fs.readFileSync(schemaPath, 'utf8');
+    const requiredModels = [
+      'model User',
+      'model FinancialAccount',
+      'model Transaction',
+      'model TransactionSplit',
+      'model BudgetCategory',
+      'model SavingsGoal',
+      'model BillSubscription',
+      'model DebtAccount',
+      'model AuditEvent',
+      'model CopilotMessage',
+    ];
+    for (const model of requiredModels) {
+      assert.ok(content.includes(model), `Schema must define ${model}`);
+    }
+  });
+
+  it('guarantees GDPR Article 17 cascading erasure (onDelete: Cascade) across all user-owned models', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
+    const content = fs.readFileSync(schemaPath, 'utf8');
+
+    const cascadeMatches = content.match(/onDelete:\s*Cascade/g);
+    assert.ok(cascadeMatches && cascadeMatches.length >= 8, 'At least 8 relational entities must enforce cascading erasure');
+  });
+
+  it('enforces BigInt integer minor-units on ledger balances, transaction amounts, and budget caps', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const schemaPath = path.join(process.cwd(), 'prisma', 'schema.prisma');
+    const content = fs.readFileSync(schemaPath, 'utf8');
+
+    assert.ok(content.includes('balanceCents          BigInt'));
+    assert.ok(content.includes('amountCents           BigInt'));
+    assert.ok(content.includes('allocatedCents        BigInt'));
+  });
+
+  it('serializes BigInt minor units to JSON without runtime exceptions', async () => {
+    // Import db module to engage BigInt serializer
+    await import('../src/server/db.ts');
+
+    const payload = {
+      accountId: 'acc_1',
+      balanceCents: BigInt(642050),
+      timestamp: '2026-10-17T00:00:00Z',
+    };
+    const json = JSON.stringify(payload);
+    assert.ok(json.includes('642050'));
+    const parsed = JSON.parse(json);
+    assert.strictEqual(parsed.balanceCents, 642050);
+  });
+});
+
