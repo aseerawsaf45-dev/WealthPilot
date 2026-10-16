@@ -1,0 +1,313 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F4F6F9;
+  --foreground: #111318;
+  --surface: #FFFFFF;
+  --surface-border: rgba(0, 0, 0, 0.06);
+  --accent-sky: #0EA5E9;
+  --accent-light-blue: #38BDF8;
+  --accent-blue-glow: rgba(14, 165, 233, 0.2);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background-color: #F4F6F9;
+  color: #0F172A;
+  font-family: var(--font-sans), 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F4F6F9;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* Luxury Frosted Glassmorphism Architecture (High-End Swiss Executive Polish) */
+.keel-card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 10px 30px -4px rgba(15, 23, 42, 0.04),
+    0 2px 8px -2px rgba(15, 23, 42, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: all 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.keel-card:hover {
+  box-shadow:
+    0 16px 36px -6px rgba(15, 23, 42, 0.07),
+    0 4px 12px rgba(15, 23, 42, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+  border-color: rgba(255, 255, 255, 1);
+}
+
+.keel-card-dark {
+  background: rgba(18, 20, 26, 0.92);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  color: #FFFFFF;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 20px 45px -10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: all 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.keel-card-dark:hover {
+  box-shadow:
+    0 25px 50px -10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* Glass Floating Nav Bar */
+.glass-nav {
+  background: rgba(244, 246, 249, 0.84);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
+}
+
+/* Glass Pill & Segmented Containers */
+.glass-segmented {
+  background: rgba(226, 232, 240, 0.7);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.04);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+/* High-End Button Animations & Micro-Interactions */
+.btn-anim {
+  position: relative;
+  overflow: hidden;
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, box-shadow;
+}
+
+.btn-anim:hover {
+  transform: translateY(-2px);
+}
+
+.btn-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+/* Specular Light Sweep Shimmer on hover */
+.btn-shimmer::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    60deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%) rotate(25deg);
+  transition: transform 600ms ease;
+  pointer-events: none;
+}
+
+.btn-shimmer:hover::after {
+  transform: translateX(100%) rotate(25deg);
+}
+
+/* Specialized Animated Button Variants */
+.btn-primary-anim {
+  background-color: #0F172A;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18);
+  position: relative;
+  overflow: hidden;
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-primary-anim:hover {
+  background-color: #1E293B;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.32);
+}
+
+.btn-primary-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+.btn-glass-anim {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  color: #0F172A;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-glass-anim:hover {
+  background: rgba(255, 255, 255, 0.98);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.09);
+  border-color: #FFFFFF;
+}
+
+.btn-glass-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+.btn-sky-anim {
+  background-color: #0EA5E9;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.25);
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-sky-anim:hover {
+  background-color: #0284C7;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(14, 165, 233, 0.4);
+}
+
+.btn-sky-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+.btn-emerald-anim {
+  background-color: #10B981;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-emerald-anim:hover {
+  background-color: #059669;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(16, 185, 129, 0.4);
+}
+
+.btn-emerald-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+.btn-rose-anim {
+  background-color: #EF4444;
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.25);
+  transition: all 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-rose-anim:hover {
+  background-color: #DC2626;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(239, 68, 68, 0.4);
+}
+
+.btn-rose-anim:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+/* Double-Bezel Hardware Architecture adapted for light luxury */
+.double-bezel {
+  padding: 0.375rem;
+  border-radius: 1.75rem;
+  background-color: rgba(0, 0, 0, 0.02);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.double-bezel-inner {
+  border-radius: calc(1.75rem - 0.375rem);
+  background-color: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.02);
+}
+
+/* Button-in-button nested island pattern */
+.btn-island {
+  border-radius: 9999px;
+  transition: all 400ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.btn-island:hover .btn-island-icon {
+  transform: translate(2px, -1px) scale(1.05);
+}
+.btn-island-icon {
+  transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Tabular numbers for financial precision */
+.font-money {
+  font-family: var(--font-mono), 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+/* Explicit Financial Profit / Gain vs Loss / Drain Utilities */
+.profit-text {
+  color: #10B981 !important;
+}
+.profit-pill {
+  background-color: #ECFDF5;
+  color: #065F46;
+  border: 1px solid #A7F3D0;
+}
+.loss-text {
+  color: #EF4444 !important;
+}
+.loss-pill {
+  background-color: #FEF2F2;
+  color: #991B1B;
+  border: 1px solid #FECACA;
+}
+
+/* Safe area padding for mobile flows */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  }
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
