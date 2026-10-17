@@ -1,0 +1,14 @@
+{
+  "project": "WealthPilot",
+  "competition": "Shenzhen International FinTech Competition-2026",
+  "branch": "backend",
+  "rules": [
+    "WealthPilot: Next.js 16.4.2 + React 19 + Tailwind CSS v4 + Prisma 6.19.3 + PostgreSQL (Neon Cloud) monorepo.",
+    "Monetary Standard: Integer minor units (amountCents / BigInt) strictly required; zero IEEE 754 float math.",
+    "Tenancy: Multi-tenant isolated by session.userId; foreign keys enforce onDelete: Cascade (GDPR Art. 17).",
+    "Compliance: GDPR (Art. 17 right to erasure, Art. 20 portability, Art. 25 AI switch); SOX (302 & 404 audit integrity); GLBA 314.4; PCI-DSS zero PAN.",
+    "Seeded Account: aseer@wealthpilot.app / admin123 (user_aseer) pre-seeded with complete ledger demo accounts in Neon DB.",
+    "Agent Lifecycle: .agents/hooks.json enforces PreInvocation compliance injection and PreToolUse safety gating."
+  ],
+  "updatedAt": "2026-10-17T03:06:36.869Z"
+}
