@@ -18,7 +18,7 @@
 - **Invariants:** integer minor units (BigInt cents) only · every query scoped by session userId · LLM never computes totals or sees raw rows · AI is opt-in (only `/user/ai-consent` writes `isAiEnabled`).
 - **Checks:** `npm test` (43 passing) · `npm run eval:ai` (46/46) · `npm run eval:ai:live` (real Groq, fixture data) · `npm run test:integration` (11 passing; hits the DB in `.env`) · `npx tsc --noEmit` (clean) · `npx eslint src` (7 errors, pre-existing) · `npm run check:security` (0 errors).
 - **Env:** `SESSION_SECRET`, `AUDIT_PEPPER`, `APP_URL` are required (added to local `.env` 2026-10-17; set separately on Vercel).
-- **Git hooks** in `.githooks/` are inactive until `git config core.hooksPath .githooks` (OPS-01).
+- **Git hooks** in `.githooks/` auto-activate on `npm install` (`prepare` sets `core.hooksPath`). pre-commit: security + tests. pre-push: clean worktree `npm ci` + tsc + security + `NODE_ENV=development npm run build` (blocks undeployable pushes). **Deploy:** never set `NODE_ENV` in host env vars; `build`/`start` force production via `scripts/next-prod.mjs`. Local in-place `next build` fails because of the `#` in the repo path (webpack); build from a path without `#`.
 <!-- agent-context:end -->
 
 ---

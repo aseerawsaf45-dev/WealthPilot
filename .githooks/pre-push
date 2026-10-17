@@ -1,0 +1,44 @@
+#!/bin/sh
+# WealthPilot Git Pre-Push Hook: refuse to push a commit that cannot be deployed.
+# Builds the pushed commit in a clean temp worktree, the way Hostinger does
+# (fresh clone + npm ci + npm run build). A temp dir also avoids the '#' in the
+# local repo path, which webpack cannot resolve.
+# Builds with NODE_ENV=development on purpose: Hostinger injected it and broke prerendering.
+# Skip in an emergency with: git push --no-verify
+
+ZERO=0000000000000000000000000000000000000000
+SHA=""
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # shortcut: only the first pushed ref is built; fine for single-branch pushes.
+  [ -z "$SHA" ] && [ "$local_sha" != "$ZERO" ] && SHA="$local_sha"
+done
+[ -z "$SHA" ] && exit 0
+
+echo "================================================================"
+echo "🚀 WealthPilot Pre-Push Deployability Gate ($(git rev-parse --short "$SHA"))"
+echo "================================================================"
+
+DIR="${TMPDIR:-/tmp}/wealthpilot-prepush-$$"
+cleanup() { cd / ; git -C "$OLDPWD_REPO" worktree remove --force "$DIR" >/dev/null 2>&1; rm -rf "$DIR"; }
+OLDPWD_REPO="$(pwd)"
+trap cleanup EXIT INT TERM
+
+git worktree add --detach "$DIR" "$SHA" >/dev/null 2>&1 || { echo "🚨 Could not create build worktree."; exit 1; }
+cd "$DIR" || exit 1
+
+fail() { printf '\n🚨 Push blocked: %s\n' "$1"; exit 1; }
+
+printf '\n[1/4] npm ci...\n'
+npm ci --no-audit --no-fund >/dev/null 2>&1 || fail "npm ci failed (package.json / package-lock.json out of sync?)."
+
+echo "[2/4] Type-checking..."
+npx tsc --noEmit || fail "TypeScript errors."
+
+echo "[3/4] Security & compliance scanner..."
+npm run check:security --silent || fail "security check failed."
+
+echo "[4/4] Production build (as the host would)..."
+NODE_ENV=development npm run build || fail "'npm run build' failed. It would fail on Hostinger too."
+
+printf '\n✅ Deployable. Pushing.\n'
+exit 0
