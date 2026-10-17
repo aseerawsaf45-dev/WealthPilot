@@ -48,14 +48,37 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 npm test
 ```
 
+### 4. Run FinTech Security & Compliance Scanner
+```bash
+npm run check:security
+```
+
+### 5. Check Project Memory & Implementation Status
+```bash
+npm run tracker:status
+```
+
+---
+
+## 📚 Architectural & Engineering Documentation
+
+- 📋 **[BACKEND_AND_AI_PLAN.md](./BACKEND_AND_AI_PLAN.md)**: Full backend system design, REST endpoint contracts, 100% free-tier AI integration plan (Gemini Flash), Holt-Winters forecasting ML, and regulatory compliance protocols.
+- 🧠 **[PROJECT_MEMORY.md](./PROJECT_MEMORY.md)**: Live single-source-of-truth tracking completed modules, active ADRs, and pending milestones.
+- 📐 **[docs/API_AND_MACHINE_LEARNING_SPECIFICATION.md](./docs/API_AND_MACHINE_LEARNING_SPECIFICATION.md)**: Deep specification for ML feature extractors, classifiers, and deterministic ledger pipelines.
+
 ---
 
 ## 🔒 Security & Privacy Architecture
 
-WealthPilot operates with zero remote telemetry. No credentials, tokens, or personal ledgers are transmitted to external servers. All cryptographic fingerprints and audit logs are recorded locally.
+WealthPilot is engineered under strict FinTech data governance standards:
+- **Zero-Knowledge Multi-Tenancy:** Hard row-level security isolation ensuring no user can access another user's accounts.
+- **Formula-Injection Neutralized:** Automatic neutralization against spreadsheet formula injection attacks (`=`, `+`, `-`, `@`) upon export and import.
+- **AI Privacy Kill Switch:** User-controllable toggle preventing any external LLM processing.
+- **Grounded Tool Calling:** The AI model never computes numbers or executes direct SQL; all financial figures are deterministically audited by the server ledger engine.
 
 *Disclaimer: WealthPilot is a personal financial calculation workspace and self-directed wellness tool, not a licensed broker-dealer or registered financial advisor.*
 
 ---
 
-© 2026 WealthPilot. Built with mathematical sovereignty.
+© 2026 WealthPilot. Built for the Shenzhen International FinTech Competition.
+

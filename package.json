@@ -7,22 +7,46 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "tsx --test scripts/test-runner.mts",
+    "postinstall": "node scripts/patch-tailwind.js",
+    "check:security": "node scripts/security-compliance-check.js",
+    "check:compliance": "node scripts/security-compliance-check.js",
+    "test:compliance": "npm test",
+    "tracker:status": "node scripts/project-tracker.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "test:integration": "tsx --env-file=.env --test scripts/integration.mts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@neon/config": "^1.9.2",
+    "@neon/env": "^1.6.3",
+    "@prisma/client": "6.19.3",
+    "@tailwindcss/postcss": "^4.3.3",
+    "bcryptjs": "^3.0.3",
     "lucide-react": "^1.57.0",
     "next": "16.4.2",
+    "postcss": "^8.5.30",
+    "prisma": "6.19.3",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vite": "^8.3.4",
     "vitest": "^5.0.5"

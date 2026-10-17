@@ -1,0 +1,327 @@
+// WealthPilot — Multi-Tenant PostgreSQL Schema
+// Shenzhen International FinTech Competition-2026 Audit Standard
+//
+// Key Design Principles:
+// 1. Strict Multi-Tenancy: Every domain entity references User with onDelete: Cascade
+// 2. Minor-Unit Precision: Monetary amounts stored as BigInt cents (eliminating float errors & BDT overflow)
+// 3. GDPR Article 17 Compliance: Deleting a User cascades and obliterates all associated records
+// 4. Performance: Composite indices on [userId, financialDate], [userId, category], [accountId]
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+// -----------------------------------------------------------------------------
+// USER IDENTITY & AUTHENTICATION (NextAuth.js v5 compatible)
+// -----------------------------------------------------------------------------
+
+model User {
+  id                String    @id @default(cuid())
+  name              String?
+  email             String    @unique
+  emailVerified     DateTime?
+  image             String?
+  passwordHash      String?   // Salted hash for credentials auth (Argon2id/Bcrypt)
+  preferredCurrency String    @default("USD") // "USD" or "BDT"
+  timezone          String    @default("UTC")
+  isAiEnabled       Boolean   @default(false) // Opt-in; only /user/ai-consent writes it (SEC-11)
+  aiConsentAt       DateTime?
+  aiConsentVersion  String?
+  aiProviders       String[]  @default([])
+  chatHistoryEnabled Boolean  @default(false)
+  region            String?   // ISO-3166 alpha-2, user-declared; null = most restrictive rules
+  uiPrefs           Json      @default("{}") // theme, locale, dateFormat, reducedMotion, isDemoMode: UI-only
+  passwordChangedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relational Integrity & GDPR Art. 17 Cascading Erasure
+  accounts          FinancialAccount[]
+  transactions      Transaction[]
+  budgets           BudgetCategory[]
+  savingsGoals      SavingsGoal[]
+  bills             BillSubscription[]
+  debts             DebtAccount[]
+  auditLogs         AuditEvent[]
+  copilotMessages   CopilotMessage[]
+  sessions          Session[]
+  merchantRules     MerchantRule[]
+
+  @@map("users")
+}
+
+// -----------------------------------------------------------------------------
+// FINANCIAL ACCOUNTS & LIABILITIES
+// -----------------------------------------------------------------------------
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT
+  INVESTMENT
+  CASH
+  LOAN
+}
+
+model FinancialAccount {
+  id                    String        @id @default(cuid())
+  userId                String
+  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                  String
+  institution           String
+  type                  AccountType   @default(CHECKING)
+  currency              String        @default("USD")
+  balanceCents          BigInt        @default(0) // Legacy cache; the API derives balance = opening + SUM(non-VOID tx)
+  openingBalanceCents   BigInt        @default(0)
+  accountNumberMask     String        // GLBA 16 CFR § 314.4 compliant (e.g. "•••• 4821")
+  isManual              Boolean       @default(true)
+  isIncludedInNetWorth  Boolean       @default(true)
+  lastSyncedAt          DateTime      @default(now())
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  transactions          Transaction[]
+  bills                 BillSubscription[]
+
+  @@index([userId])
+  @@map("financial_accounts")
+}
+
+// -----------------------------------------------------------------------------
+// TRANSACTION LEDGER & SPLITS (Double-entry ready)
+// -----------------------------------------------------------------------------
+
+enum TransactionStatus {
+  PENDING
+  CLEARED
+  RECONCILED
+  VOID
+}
+
+enum TransactionSource {
+  MANUAL
+  CSV_IMPORT
+  BANK_FEED
+  DEMO
+}
+
+model Transaction {
+  id                    String              @id @default(cuid())
+  userId                String
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId             String
+  account               FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  financialDate         String              // YYYY-MM-DD
+  postedAt              DateTime            @default(now())
+  merchant              String
+  normalizedMerchant    String
+  category              String
+  amountCents           BigInt              // Minor-units (Inflow > 0, Outflow < 0)
+  currency              String              @default("USD")
+  status                TransactionStatus   @default(CLEARED)
+  isTransfer            Boolean             @default(false)
+  linkedTransferId      String?             // For transfer pairing
+  source                TransactionSource   @default(MANUAL)
+  importFingerprint     String?             // sha256, CSV_IMPORT rows only; NULL when voided
+  importBatchId         String?
+  notes                 String?
+  tags                  String[]            @default([])
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  splits                TransactionSplit[]
+
+  @@index([userId, financialDate])
+  @@index([userId, category])
+  @@index([accountId])
+  @@unique([userId, importFingerprint])
+  @@index([userId, importBatchId])
+  @@map("transactions")
+}
+
+model TransactionSplit {
+  id              String        @id @default(cuid())
+  transactionId   String
+  transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  category        String
+  amountCents     BigInt        // Split minor-unit allocation
+  note            String?
+
+  @@index([transactionId])
+  @@map("transaction_splits")
+}
+
+// -----------------------------------------------------------------------------
+// BUDGET ENVELOPES & PACING
+// -----------------------------------------------------------------------------
+
+model BudgetCategory {
+  id                    String    @id @default(cuid())
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category              String
+  allocatedCents        BigInt    // Spending ceiling in cents
+  monthYear             String    // YYYY-MM
+  rolloverEnabled       Boolean   @default(false)
+  alertThresholdPercent Int       @default(85)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([userId, category, monthYear])
+  @@index([userId])
+  @@map("budget_categories")
+}
+
+// -----------------------------------------------------------------------------
+// SAVINGS GOALS & MILESTONES
+// -----------------------------------------------------------------------------
+
+model SavingsGoal {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  targetCents         BigInt
+  currentCents        BigInt    @default(0)
+  targetDate          String?   // YYYY-MM-DD (optional for flexible milestones)
+  category            String
+  priority            String    @default("medium") // low | medium | high
+  isPaused            Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("savings_goals")
+}
+
+// -----------------------------------------------------------------------------
+// RECURRING BILLS & OBLIGATIONS
+// -----------------------------------------------------------------------------
+
+enum BillFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+model BillSubscription {
+  id                String            @id @default(cuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  amountCents       BigInt
+  frequency         BillFrequency     @default(MONTHLY)
+  nextDueDate       String            // YYYY-MM-DD
+  category          String
+  isAutoPay         Boolean           @default(false)
+  accountId         String?
+  account           FinancialAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  status            String            @default("active")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([userId])
+  @@map("bill_subscriptions")
+}
+
+// -----------------------------------------------------------------------------
+// DEBT PAYOFF ENGINE (Avalanche / Snowball)
+// -----------------------------------------------------------------------------
+
+model DebtAccount {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  balanceCents        BigInt
+  aprPercent          Float     // e.g. 24.99
+  minimumPaymentCents BigInt
+  dueDateDay          Int       // 1 - 31
+  category            String    // credit_card, student_loan, mortgage, personal_loan
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("debt_accounts")
+}
+
+// -----------------------------------------------------------------------------
+// IMMUTABLE AUDIT TRAIL (SOX Section 302/404 & Compliance Logging)
+// -----------------------------------------------------------------------------
+
+model AuditEvent {
+  id              String    @id @default(cuid())
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType       String    // "TRANSACTION_CREATE", "LEDGER_RECONCILE", etc.
+  actor           String    // "USER", "SYSTEM", "COPILOT"
+  details         String    // Redacted event summary
+  ipAddress       String?
+  userAgent       String?
+  checksumBefore  String?   // SOX cryptographic hash prior to mutation
+  checksumAfter   String    // SOX cryptographic hash after mutation
+  createdAt       DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("audit_events")
+}
+
+// -----------------------------------------------------------------------------
+// AI COPILOT CHAT & AUDITED EVIDENCE TRAIL
+// -----------------------------------------------------------------------------
+
+model CopilotMessage {
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            String    // "user", "assistant", "system"
+  content         String
+  evidenceScope   String?   // Audited tool call evidence reference
+  createdAt       DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("copilot_messages")
+}
+
+// -----------------------------------------------------------------------------
+// SESSIONS, RATE LIMITS, CATEGORIZATION RULES
+// -----------------------------------------------------------------------------
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model RateLimitBucket {
+  key     String   @id // e.g. "login:email:<sha256>"; never raw emails or IPs
+  count   Int
+  resetAt DateTime
+
+  @@map("rate_limit_buckets")
+}
+
+model MerchantRule {
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  normalizedMerchant String   // lower-cased keyword matched with "contains"
+  category           String
+  updatedAt          DateTime @updatedAt
+
+  @@id([userId, normalizedMerchant])
+  @@map("merchant_rules")
+}
