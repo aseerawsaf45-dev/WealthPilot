@@ -227,7 +227,12 @@ export function GoalsTab() {
                     </span>
                   </span>
                   <span className="block mt-1.5 text-xs font-bold text-slate-900">{planHeadline(g.plan)}</span>
-                  <span className="block mt-0.5 text-[11px] font-semibold text-sky-700">View plan →</span>
+                  <span className="block mt-0.5 text-[11px] font-semibold text-sky-700">
+                    {(() => {
+                      const ways = (g.plan.contingencies ?? []).filter((c) => c.feasible && c.action.kind !== 'none').length;
+                      return ways ? `${ways} way${ways === 1 ? '' : 's'} to make it reachable →` : 'View plan →';
+                    })()}
+                  </span>
                 </button>
               ) : (
                 <button

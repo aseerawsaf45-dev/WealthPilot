@@ -566,6 +566,34 @@ describe('AI goal planner (planGoal)', () => {
     assert.ok(!p.facts.some((f) => f.label.includes('House')), 'user-typed goal names stay out of model-visible labels');
   });
 
+  it('offers exact contingency options when the deadline is not reachable', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    // 9,000.00 left in 3 months = 3,000/mo needed; 2,000 free; comfortable rate 1,000/mo.
+    const p = planGoal({ goalName: 'House', targetDate: '2027-01-17' }, { ...base, goals: [goal(null)] });
+    assert.strictEqual(p.verdict, 'not_reachable');
+    const byId = Object.fromEntries(p.contingencies.map((c) => [c.id, c]));
+    assert.deepStrictEqual(byId.extend.action, { kind: 'set_deadline', date: '2027-07-17' }); // 9,000 / 1,000 = 9 months
+    assert.strictEqual(byId.cut.feasible, false, 'needs 4,000/mo, more than all flexible spending (1,000)');
+    assert.deepStrictEqual(byId.balanced.action, { kind: 'deadline_and_cuts', date: '2027-07-17', cuts: [{ category: 'Dining', allocatedCents: 80000 }] });
+    assert.deepStrictEqual(byId.lower_target.action, { kind: 'set_target', cents: 400000 }); // 1,000 saved + 1,000 x 3
+    assert.strictEqual(fact(p, 'Option: extra monthly income needed'), 400000);
+    assert.ok(!byId.record_income, 'income was recorded');
+    assert.ok(!p.contingencies.some((c) => c.id !== 'cut' && c.action.kind === 'budget_cuts' && /Housing/.test(JSON.stringify(c))), 'fixed costs never cut');
+    assert.ok(p.contingencies.findIndex((c) => !c.feasible) > p.contingencies.findLastIndex((c) => c.feasible), 'workable options listed first');
+  });
+
+  it('suggests pausing other goals, and flags missing income', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const other = { id: 'car', name: 'Car', targetCents: 720000, currentCents: 0, targetDate: '2027-10-17', isPaused: false }; // 600/mo
+    const p = planGoal({ goalName: 'House' }, { ...base, goals: [{ ...goal('2027-10-17'), id: 'house' }, other] });
+    assert.strictEqual(p.verdict, 'stretch');
+    const pause = p.contingencies.find((c) => c.id === 'pause_others');
+    assert.deepStrictEqual(pause?.action, { kind: 'pause_goals', goalIds: ['car'], names: ['Car'] });
+
+    const noIncome = planGoal({ goalName: 'House' }, { ...base, transactions: base.transactions.filter((t) => t.amountCents < 0), goals: [goal('2027-01-17')] });
+    assert.strictEqual(noIncome.contingencies[0].id, 'record_income');
+  });
+
   it('is a stretch between half and all of the surplus', async () => {
     const { planGoal } = await import('../src/server/ai/tools.ts');
     assert.strictEqual(planGoal({ goalName: 'House' }, { ...base, goals: [goal('2027-04-17')] }).verdict, 'stretch'); // 150,000/month

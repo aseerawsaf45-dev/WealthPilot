@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, X, CheckCircle2, AlertTriangle, CalendarDays, RefreshCw, Loader2, Info, Clock, PiggyBank } from 'lucide-react';
+import { Sparkles, X, CheckCircle2, AlertTriangle, CalendarDays, RefreshCw, Loader2, Info, Clock, PiggyBank, Scissors, Scale, PauseCircle, Target, TrendingUp, Lightbulb } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { formatFact, formatMoney, dollarsToCents } from '../lib/money';
 import { planStaleReason, daysAgo } from '../lib/goalPlan';
 import { AiConsentDialog } from './AiConsentDialog';
-import type { CopilotFact, GoalPlanSnapshot, SavingsGoal } from '../types/finance';
+import type { Contingency, ContingencyAction, CopilotFact, GoalPlanSnapshot, SavingsGoal } from '../types/finance';
 
 // Class names live here (not in src/lib): Tailwind only scans src/app and src/components.
 export const VERDICT_STYLE: Record<GoalPlanSnapshot['verdict'], { label: string; pill: string; Icon: typeof CheckCircle2 }> = {
@@ -61,6 +61,123 @@ const PRESETS = [
   { label: '2 years', value: () => addMonths(24) },
   { label: 'Suggest a date', value: () => '' },
 ];
+
+const OPTION_ICON: Record<Contingency['id'], typeof CalendarDays> = {
+  record_income: Info,
+  extend: CalendarDays,
+  cut: Scissors,
+  balanced: Scale,
+  pause_others: PauseCircle,
+  lower_target: Target,
+  income: TrendingUp,
+};
+
+/** Plain-language description of exactly what "Apply" will change, shown in the confirm. */
+function describeAction(goal: SavingsGoal, a: ContingencyAction): string {
+  const budgets = (cuts: { category: string; allocatedCents: number }[]) =>
+    `set this month's budgets to ${cuts.map((c) => `${c.category} ${formatMoney(c.allocatedCents)}`).join(', ')}`;
+  switch (a.kind) {
+    case 'set_deadline':
+      return `Set the deadline of "${goal.name}" to ${a.date}?`;
+    case 'set_target':
+      return `Change the target of "${goal.name}" to ${formatMoney(a.cents)}?`;
+    case 'budget_cuts':
+      return `${budgets(a.cuts)[0].toUpperCase()}${budgets(a.cuts).slice(1)}?`;
+    case 'deadline_and_cuts':
+      return `Set the deadline to ${a.date} and ${budgets(a.cuts)}?`;
+    case 'pause_goals':
+      return `Pause ${a.names.join(', ')}? You can resume them any time.`;
+    default:
+      return '';
+  }
+}
+
+/** "Ways to make it reachable": server-calculated options, each with an optional one-click Apply. */
+function ContingencyOptions({ goal, options, onDeadlineChange }: { goal: SavingsGoal; options: Contingency[]; onDeadlineChange: (d: string) => void }) {
+  const { updateGoal, addBudget } = useFinance();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
+
+  const apply = async (c: Contingency) => {
+    const a = c.action;
+    if (a.kind === 'none' || !window.confirm(describeAction(goal, a))) return;
+    setBusy(c.id);
+    const setBudgets = async (cuts: { category: string; allocatedCents: number }[]) => {
+      for (const cut of cuts) {
+        // addBudget upserts by category for the current month.
+        await addBudget({ category: cut.category, allocatedCents: cut.allocatedCents, spentCents: 0, period: 'monthly', rolloverEnabled: false, rolloverCents: 0, alertThresholdPercent: 85 });
+      }
+    };
+    if (a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts') {
+      await updateGoal(goal.id, { targetDate: a.date });
+      onDeadlineChange(a.date);
+    }
+    if (a.kind === 'set_target') await updateGoal(goal.id, { targetCents: a.cents });
+    if (a.kind === 'budget_cuts' || a.kind === 'deadline_and_cuts') await setBudgets(a.cuts);
+    if (a.kind === 'pause_goals') for (const id of a.goalIds) await updateGoal(id, { isPaused: true });
+    setBusy(null);
+    setApplied(c.id);
+  };
+
+  return (
+    <section aria-labelledby="ways-title" className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <Lightbulb className="w-4 h-4 text-amber-500" />
+        <h4 id="ways-title" className="font-bold text-sm text-[#0F172A]">
+          Ways to make it reachable
+        </h4>
+      </div>
+      {applied && (
+        <p role="status" className="wp-pop p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold">
+          Applied. Press <strong>Recalculate</strong> to see the updated plan.
+        </p>
+      )}
+      <ul className="wp-stagger grid gap-2.5 sm:grid-cols-2">
+        {options.map((c) => {
+          const Icon = OPTION_ICON[c.id] ?? Lightbulb;
+          const actionable = c.action.kind !== 'none';
+          return (
+            <li
+              key={c.id}
+              className={`flex flex-col gap-2 p-3.5 rounded-xl border ${
+                c.feasible ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-200 opacity-80'
+              } ${c.id === 'record_income' ? 'sm:col-span-2 bg-amber-50 border-amber-200' : ''}`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="flex items-center gap-2 font-bold text-slate-900">
+                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center ${c.feasible ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-500'}`}>
+                    <Icon className="w-4 h-4" />
+                  </span>
+                  {c.title}
+                </span>
+                {c.id !== 'record_income' && (
+                  <span
+                    className={`flex-shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                      c.feasible ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    {c.feasible ? 'Works' : 'Not enough alone'}
+                  </span>
+                )}
+              </div>
+              <p className="text-slate-600 leading-relaxed">{c.summary}</p>
+              {actionable && (
+                <button
+                  onClick={() => apply(c)}
+                  disabled={busy !== null || applied === c.id}
+                  className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-bold disabled:opacity-50 cursor-pointer"
+                >
+                  {busy === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {applied === c.id ? 'Applied' : 'Apply'}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 /** AI goal planner. Shows the saved plan instantly; "Recalculate" calls the server and saves the new plan. */
 export function GoalPlanDialog({ goalId, onClose }: { goalId: string; onClose: () => void }) {
@@ -262,6 +379,10 @@ export function GoalPlanDialog({ goalId, onClose }: { goalId: string; onClose: (
                       )}
                     </div>
                   </section>
+
+                  {plan.contingencies && plan.contingencies.length > 0 && (
+                    <ContingencyOptions goal={goal} options={plan.contingencies} onDeadlineChange={setTargetDate} />
+                  )}
 
                   {/* AI guidance */}
                   <section className="space-y-2">

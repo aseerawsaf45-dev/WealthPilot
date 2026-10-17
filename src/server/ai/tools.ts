@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { ymd, monthYear } from '../schemas';
 import { addDays, billState, spendByCategory } from '../mappers';
 import type { FactDraft, SuggestedAction } from './schema';
+import type { Contingency } from '@/types/finance';
 
 // ---- Data the tools run on (already scoped to one user) ---------------------
 
@@ -292,7 +293,10 @@ export interface GoalPlan extends ToolOutput {
   verdict: PlanVerdict;
   steps: string[]; // trusted text; facts referenced as {{#i}}
   milestones: { label: string; factIndex: number }[];
+  contingencies: Contingency[]; // summary is trusted text with {{#i}} refs
 }
+
+const MAX_PLAN_MONTHS = 600; // beyond 50 years a "later deadline" is not a real option
 
 // Spending that is usually fixed in the short term; never suggested as a cut.
 const FIXED_SPEND = /(housing|rent|mortgage|utilit|insurance|income|transfer|debt|loan|tax|medical|health)/i;
@@ -312,7 +316,7 @@ function addMonthsYmd(ymd: string, months: number): string {
 export function planGoal(args: { goalName: string; targetDate?: string }, data: FinanceData): GoalPlan {
   const goal = data.goals.find((g) => g.name === args.goalName);
   if (!goal) {
-    return { period: null, facts: [], template: 'I could not find that goal.', limitations: [], actions: [], verdict: 'no_data', steps: [], milestones: [] };
+    return { period: null, facts: [], template: 'I could not find that goal.', limitations: [], actions: [], verdict: 'no_data', steps: [], milestones: [], contingencies: [] };
   }
   const facts: FactDraft[] = [];
   const add = (f: FactDraft) => facts.push(f) - 1;
@@ -322,7 +326,7 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
   const fRemaining = add(money('Still needed', remaining, data.currency));
   const limitations: string[] = ['Plans are estimates based on your recent averages; real months will vary.'];
   const actions: ToolOutput['actions'] = [{ label: 'Open goals', action: 'open_goals' }];
-  const base = { period: null, limitations, actions };
+  const base = { period: null, limitations, actions, contingencies: [] as Contingency[] };
 
   if (remaining === 0) {
     return { ...base, facts, template: `You have already reached ${goal.name}: {{#${fSaved}}} of {{#${fTarget}}}.`, verdict: 'reached', steps: [], milestones: [] };
@@ -371,9 +375,8 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
   const surplus = avgIncome - avgSpending;
 
   // Other dated goals compete for the same surplus.
-  const otherNeeds = data.goals
-    .filter((g) => g !== goal && !g.isPaused && g.targetDate && g.targetDate > data.today && g.targetCents > g.currentCents)
-    .reduce((s, g) => s + Math.ceil((g.targetCents - g.currentCents) / monthsUntil(data.today, g.targetDate!)), 0);
+  const otherGoals = data.goals.filter((g) => g !== goal && !g.isPaused && g.targetDate && g.targetDate > data.today && g.targetCents > g.currentCents);
+  const otherNeeds = otherGoals.reduce((s, g) => s + Math.ceil((g.targetCents - g.currentCents) / monthsUntil(data.today, g.targetDate!)), 0);
   const free = surplus - otherNeeds;
 
   const fIncome = add(money('Average monthly income', avgIncome, data.currency));
@@ -395,9 +398,11 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
   let monthly: number;
   let fMonthly: number;
   let headline: string;
+  let monthsLeft = 0;
+  let required = 0;
   if (deadline) {
-    const monthsLeft = monthsUntil(data.today, deadline);
-    const required = Math.ceil(remaining / monthsLeft);
+    monthsLeft = monthsUntil(data.today, deadline);
+    required = Math.ceil(remaining / monthsLeft);
     verdict = free <= 0 || required > free ? 'not_reachable' : required <= comfortable ? 'on_track' : 'stretch';
     const fDeadline = add({ label: 'Your deadline', value: deadline, unit: 'date', kind: 'recorded' });
     fMonthly = add(money('Needed each month to hit your deadline', required, data.currency, 'estimate'));
@@ -457,6 +462,23 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
     }
   }
 
+  // Contingency options: each one, on its own, would make the deadline comfortable (need ≤ half the free surplus).
+  const contingencies: Contingency[] = [];
+  if (avgIncome === 0) {
+    contingencies.push({
+      id: 'record_income',
+      title: 'Record your income first',
+      summary: 'WealthPilot found no income in the months it averaged, so every option below assumes you earn nothing. Add your salary or other income as transactions, then recalculate.',
+      feasible: true,
+      action: { kind: 'none' },
+    });
+  }
+  if (deadline && (verdict === 'stretch' || verdict === 'not_reachable')) {
+    contingencies.push(...contingencyOptions());
+  }
+  // Workable options first; the order within each group is the order of preference.
+  contingencies.sort((a, b) => Number(b.feasible) - Number(a.feasible));
+
   return {
     ...base,
     facts,
@@ -466,7 +488,131 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
     verdict,
     steps,
     milestones,
+    contingencies,
   };
+
+  function contingencyOptions(): Contingency[] {
+    const out: Contingency[] = [];
+    const est = (label: string, cents: number) => add(money(label, cents, data.currency, 'estimate'));
+    const estDate = (label: string, date: string) => add({ label, value: date, unit: 'date', kind: 'estimate' });
+    const flex = [...catTotals.entries()]
+      .filter(([cat]) => !FIXED_SPEND.test(cat))
+      .map(([category, total]) => ({ category, avg: Math.round(total / monthsWithData) }))
+      .filter((c) => c.avg > 0)
+      .sort((x, y) => y.avg - x.avg);
+    const flexTotal = flex.reduce((s, c) => s + c.avg, 0);
+    const flexNames = `${flex.slice(0, 3).map((c) => c.category).join(', ')}${flex.length > 3 ? ' and others' : ''}`;
+    // Extra monthly room needed so that the requirement is at most half of what is free.
+    const gap = Math.max(0, 2 * required - free);
+
+    // 1. Later deadline at the comfortable rate.
+    if (comfortable > 0) {
+      const m = Math.ceil(remaining / comfortable);
+      const ok = m <= MAX_PLAN_MONTHS;
+      const date = addMonthsYmd(data.today, Math.min(m, MAX_PLAN_MONTHS));
+      const fDate = estDate('Option: later deadline', date);
+      const fRate = est('Option: monthly saving with a later deadline', Math.ceil(remaining / m));
+      out.push({
+        id: 'extend',
+        title: 'Move the deadline',
+        summary: ok
+          ? `Keep your budget as it is and aim for {{#${fDate}}}: about {{#${fRate}}} a month, no more than half of what you have free.`
+          : 'At your current free amount this would take more than fifty years; combine it with another option.',
+        feasible: ok,
+        action: ok ? { kind: 'set_deadline', date } : { kind: 'none' },
+      });
+    } else {
+      out.push({
+        id: 'extend',
+        title: 'Move the deadline',
+        summary: 'A later date alone will not work: nothing is left over each month after spending and your other goals.',
+        feasible: false,
+        action: { kind: 'none' },
+      });
+    }
+
+    // 2. Cut flexible spending by exactly the gap, spread pro-rata.
+    if (flexTotal > 0 && gap > 0) {
+      const fGap = est('Option: spending cut needed each month', gap);
+      const fFlex = est('Option: your flexible spending each month', flexTotal);
+      const ok = gap * 2 <= flexTotal; // more than half of flexible spending rarely sticks
+      const cuts = flex.map((c) => ({ category: c.category, allocatedCents: c.avg - Math.round((c.avg * Math.min(gap, flexTotal)) / flexTotal) }));
+      out.push({
+        id: 'cut',
+        title: 'Cut flexible spending',
+        summary:
+          gap > flexTotal
+            ? `It would take {{#${fGap}}} a month, more than all of your flexible spending ({{#${fFlex}}}).`
+            : `Cut {{#${fGap}}} a month out of {{#${fFlex}}} of flexible spending (${flexNames}). ` +
+              (ok ? 'Applying sets this month’s budgets to the new limits.' : 'That is more than half of it, so it is unlikely to stick.'),
+        feasible: ok,
+        action: ok ? { kind: 'budget_cuts', cuts } : { kind: 'none' },
+      });
+    }
+
+    // 3. Balanced: trim a fifth and move the date as far as still needed.
+    if (flexTotal > 0) {
+      const trim = flex.reduce((s, c) => s + Math.round(c.avg / 5), 0);
+      const rate = Math.floor(Math.max(0, free + trim) / 2);
+      if (rate > 0) {
+        const m = Math.ceil(remaining / rate);
+        const ok = m <= MAX_PLAN_MONTHS;
+        const date = addMonthsYmd(data.today, Math.min(m, MAX_PLAN_MONTHS));
+        const fTrim = est('Option: monthly saving from trimming flexible spending', trim);
+        const fDate = estDate('Option: deadline after trimming', date);
+        out.push({
+          id: 'balanced',
+          title: 'Trim a little and wait a little',
+          summary: `Trim flexible spending by a fifth (about {{#${fTrim}}} a month) and aim for {{#${fDate}}}.`,
+          feasible: ok,
+          action: ok ? { kind: 'deadline_and_cuts', date, cuts: flex.map((c) => ({ category: c.category, allocatedCents: c.avg - Math.round(c.avg / 5) })) } : { kind: 'none' },
+        });
+      }
+    }
+
+    // 4. Pause the other dated goals.
+    if (otherGoals.length) {
+      const fFreed = est('Option: monthly amount freed by pausing other goals', otherNeeds);
+      const ok = required <= Math.floor(Math.max(0, surplus) / 2);
+      const names = otherGoals.map((g) => g.name);
+      const ids = otherGoals.map((g) => g.id).filter((id): id is string => !!id);
+      out.push({
+        id: 'pause_others',
+        title: 'Put other goals on hold',
+        summary: ok
+          ? `Pause ${names.join(', ')} for now: that frees {{#${fFreed}}} a month, enough for this deadline.`
+          : `Pausing ${names.join(', ')} frees {{#${fFreed}}} a month, but that is not enough on its own.`,
+        feasible: ok,
+        action: ok && ids.length === otherGoals.length ? { kind: 'pause_goals', goalIds: ids, names } : { kind: 'none' },
+      });
+    }
+
+    // 5. Keep the date, lower the target to what the comfortable rate reaches.
+    const affordable = goal!.currentCents + comfortable * monthsLeft;
+    if (comfortable > 0 && affordable < goal!.targetCents) {
+      const fNew = est('Option: target you can reach by the deadline', affordable);
+      out.push({
+        id: 'lower_target',
+        title: 'Lower the target',
+        summary: `Keep your deadline but aim for {{#${fNew}}} instead of {{#${fTarget}}}, saving about half of what you have free each month.`,
+        feasible: true,
+        action: { kind: 'set_target', cents: affordable },
+      });
+    }
+
+    // 6. Earn more (information only).
+    if (gap > 0) {
+      const fExtra = est('Option: extra monthly income needed', gap);
+      out.push({
+        id: 'income',
+        title: 'Earn a bit more',
+        summary: `About {{#${fExtra}}} more income each month (a raise, side work, selling unused items) would make this deadline comfortable.`,
+        feasible: true,
+        action: { kind: 'none' },
+      });
+    }
+    return out;
+  }
 }
 
 function debtSummary(_args: Record<string, never>, data: FinanceData): ToolOutput {

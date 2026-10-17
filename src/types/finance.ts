@@ -170,6 +170,24 @@ export interface CopilotMessage {
   suggestedActions?: { label: string; action: string }[];
 }
 
+/** What "Apply" does for a contingency option (all through existing actions). */
+export type ContingencyAction =
+  | { kind: 'set_deadline'; date: string }
+  | { kind: 'set_target'; cents: number }
+  | { kind: 'budget_cuts'; cuts: { category: string; allocatedCents: number }[] }
+  | { kind: 'deadline_and_cuts'; date: string; cuts: { category: string; allocatedCents: number }[] }
+  | { kind: 'pause_goals'; goalIds: string[]; names: string[] }
+  | { kind: 'none' };
+
+/** One way to make an unreachable / stretch goal comfortably reachable. `feasible` = would work with current numbers. */
+export interface Contingency {
+  id: 'record_income' | 'extend' | 'cut' | 'balanced' | 'pause_others' | 'lower_target' | 'income';
+  title: string;
+  summary: string;
+  feasible: boolean;
+  action: ContingencyAction;
+}
+
 /** Latest AI goal plan, saved on the goal (POST /goals/:id/plan). Numbers live only in `facts` and server text. */
 export interface GoalPlanSnapshot {
   verdict: 'reached' | 'on_track' | 'stretch' | 'not_reachable' | 'no_data';
@@ -178,6 +196,8 @@ export interface GoalPlanSnapshot {
   facts: CopilotFact[];
   steps: string[];
   milestones: { label: string; date: string }[];
+  /** Options that would make the goal reachable (stretch / not reachable only; absent on older saved plans). */
+  contingencies?: Contingency[];
   limitations: string[];
   source: 'rules' | 'llm:groq' | 'llm:gemini';
   /** Deadline the plan was calculated for (null = no deadline; a date was suggested). */

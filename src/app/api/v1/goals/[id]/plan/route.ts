@@ -50,6 +50,7 @@ export const POST = authed<IdContext>(async (request, { userId }, ctx) => {
     facts: answer.facts,
     steps: plan.steps.map(fill),
     milestones: plan.milestones.map((m) => ({ label: m.label, date: String(plan.facts[m.factIndex].value) })),
+    contingencies: plan.contingencies.map((c) => ({ ...c, summary: fill(c.summary) })),
     limitations: answer.limitations,
     source: answer.source,
     targetDate: targetDate ?? goal.targetDate ?? null,
