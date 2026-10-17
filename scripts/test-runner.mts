@@ -522,6 +522,36 @@ describe('Server mappers, fingerprints & audit chain (pure)', () => {
   });
 });
 
+describe('AI privacy gateway', () => {
+  it('redacts card numbers, emails, phone numbers and SSNs before anything reaches a model', async () => {
+    const { redactForLlm } = await import('../src/server/ai/privacy.ts');
+    const out = redactForLlm('Card 4111 1111 1111 1111, mail aseer@wealthpilot.app, call +1 (415) 555-0199, SSN 123-45-6789. Dining was high.');
+    assert.ok(!out.includes('4111'), out);
+    assert.ok(!out.includes('aseer@'), out);
+    assert.ok(!out.includes('555-0199'), out);
+    assert.ok(!out.includes('123-45-6789'), out);
+    assert.ok(out.includes('Dining was high'), 'ordinary text survives');
+  });
+
+  it('never calls the model when AI is off (calculated answer only)', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const data = { today: '2026-10-17', currency: 'USD', transactions: [], budgets: [], goals: [], bills: [], debts: [] };
+    const realFetch = globalThis.fetch;
+    let fetched = 0;
+    globalThis.fetch = (async () => {
+      fetched += 1;
+      throw new Error('no network in this test');
+    }) as typeof fetch;
+    try {
+      const res = await answerQuestion('Something the router does not know', data, { llm: null });
+      assert.strictEqual(res.source, 'rules');
+      assert.strictEqual(fetched, 0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
 describe('CSRF origin check', () => {
   it('allows same-host browsers on any dev host, blocks cross-site', async () => {
     const { assertSameOrigin } = await import('../src/server/http.ts');

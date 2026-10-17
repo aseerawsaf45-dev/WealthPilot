@@ -5,6 +5,7 @@ import { useFinance } from '../context/FinanceContext';
 import { BudgetCategory } from '../types/finance';
 import { formatMoney, dollarsToCents, calculateBudgetPace } from '../lib/money';
 import { BudgetPacingGaugeChart } from './InteractiveCharts';
+import { RowActions } from './RowActions';
 import {
   PieChart,
   Plus,
@@ -16,17 +17,40 @@ import {
 } from 'lucide-react';
 
 export function BudgetsTab() {
-  const { budgets, addBudget, updateBudget } = useFinance();
+  const { budgets, addBudget, updateBudget, deleteBudget } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form State
   const [category, setCategory] = useState('');
   const [allocated, setAllocated] = useState('');
   const [rollover, setRollover] = useState(false);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setCategory('');
+    setAllocated('');
+    setRollover(false);
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (b: BudgetCategory) => {
+    setEditingId(b.id);
+    setCategory(b.category);
+    setAllocated((b.allocatedCents / 100).toString());
+    setRollover(b.rolloverEnabled);
+    setIsAddOpen(true);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!category.trim() || !allocated.trim()) return;
+
+    if (editingId) {
+      await updateBudget(editingId, { allocatedCents: dollarsToCents(allocated), rolloverEnabled: rollover });
+      setIsAddOpen(false);
+      return;
+    }
 
     addBudget({
       category: category.trim(),
@@ -58,7 +82,7 @@ export function BudgetsTab() {
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAdd}
           className="btn-primary-anim btn-shimmer flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-sky-400" />
@@ -87,6 +111,7 @@ export function BudgetsTab() {
                   </p>
                 </div>
 
+                <div className="flex items-center gap-1.5">
                 <span
                   className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${
                     pace.paceStatus === 'over'
@@ -102,6 +127,8 @@ export function BudgetsTab() {
                     ? 'Surplus / Under Budget'
                     : 'On Track'}
                 </span>
+                <RowActions label={`${b.category} budget`} onEdit={() => openEdit(b)} onDelete={() => deleteBudget(b.id)} />
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -157,7 +184,7 @@ export function BudgetsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-md">
           <div className="max-w-md w-full bg-white/95 backdrop-blur-2xl p-7 sm:p-8 rounded-3xl border border-white/90 shadow-2xl animate-in zoom-in-95 text-xs">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-5">
-              <h3 className="text-base font-bold text-[#0F172A]">Create Budget Allocation</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Budget Allocation' : 'Create Budget Allocation'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="btn-anim text-slate-400 hover:text-slate-700 p-1 rounded-full cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
@@ -171,6 +198,8 @@ export function BudgetsTab() {
                   placeholder="e.g. Travel, Dining, Streaming"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
+                  disabled={!!editingId}
+                  title={editingId ? 'The category of an existing budget cannot be changed' : undefined}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
                   required
                 />

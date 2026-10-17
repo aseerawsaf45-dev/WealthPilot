@@ -132,6 +132,8 @@ export interface UserPreferences {
   isDemoMode: boolean;
   dateFormat: string;
   reducedMotion: boolean;
+  /** Learn tab progress; saved to the account (uiPrefs) when signed in. */
+  learn?: { xp: number; streak: number; completed: string[] };
   autoCategorizationRules: Array<{
     id: string;
     keyword: string;
@@ -153,4 +155,19 @@ export interface CopilotMessage {
     confidence: 'verified_fact' | 'calculated_estimate' | 'actionable_suggestion';
   };
   clarificationNeeded?: boolean;
+  // Server copilot answers (signed in): numbers come only from `facts`.
+  facts?: CopilotFact[];
+  limitations?: string[];
+  source?: 'rules' | 'llm:groq';
+  insights?: { title: string; description: string }[];
+  suggestedActions?: { label: string; action: string }[];
+}
+
+export interface CopilotFact {
+  id: string;
+  label: string;
+  value: number | string;
+  unit: 'cents' | 'pct' | 'count' | 'days' | 'months' | 'date' | 'text';
+  currency?: string;
+  kind: 'recorded' | 'estimate';
 }

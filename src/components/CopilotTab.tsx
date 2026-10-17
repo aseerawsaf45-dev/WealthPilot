@@ -3,6 +3,10 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { executeCopilotQuery } from '../services/copilotService';
+import { api } from '../lib/api';
+import { formatMoney } from '../lib/money';
+import { AiConsentDialog } from './AiConsentDialog';
+import type { CopilotFact, CopilotMessage } from '../types/finance';
 import {
   Sparkles,
   Send,
@@ -14,7 +18,44 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
-export function CopilotTab() {
+interface ServerAnswer {
+  answer: string;
+  insights: { title: string; description: string }[];
+  suggested_actions: { label: string; action: string }[];
+  facts: CopilotFact[];
+  limitations: string[];
+  source: 'rules' | 'llm:groq';
+}
+
+// Server action ids -> app tabs. Unknown ids are ignored (the model never controls navigation targets).
+const ACTION_TABS: Record<string, string> = {
+  open_transactions: 'transactions',
+  open_budgets: 'budgets',
+  open_goals: 'goals',
+  open_bills: 'bills',
+  open_category_report: 'overview',
+  open_settings_privacy: 'settings',
+};
+
+// Module-level so the React compiler doesn't treat it as an impure call during render.
+const messageId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+function formatFact(f: CopilotFact): string {
+  switch (f.unit) {
+    case 'cents':
+      return formatMoney(Number(f.value), f.currency);
+    case 'pct':
+      return `${f.value}%`;
+    case 'days':
+      return `${f.value} days`;
+    case 'months':
+      return Number(f.value) === 1 ? '1 month' : `${f.value} months`;
+    default:
+      return String(f.value);
+  }
+}
+
+export function CopilotTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const {
     accounts,
     transactions,
@@ -25,10 +66,15 @@ export function CopilotTab() {
     copilotHistory,
     addCopilotMessage,
     clearCopilotHistory,
+    setPreferences,
   } = useFinance();
 
   const [inputQuery, setInputQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const isSignedIn = preferences.isAuthenticated === true;
+  // Signed in, the server answers with calculations even when AI wording is off.
+  const canAsk = isSignedIn || preferences.isAiEnabled;
 
   const samplePrompts = [
     'Summarize my spending this month',
@@ -38,13 +84,13 @@ export function CopilotTab() {
     'How is my emergency fund goal progressing?',
   ];
 
-  const handleSend = (queryToSend?: string) => {
+  const handleSend = async (queryToSend?: string) => {
     const text = queryToSend || inputQuery;
-    if (!text.trim() || isProcessing) return;
+    if (!text.trim() || isProcessing || !canAsk) return;
 
     // 1. Append user message
     const userMsg = {
-      id: `user_${Date.now()}`,
+      id: messageId('user'),
       sender: 'user' as const,
       timestamp: new Date().toISOString(),
       content: text.trim(),
@@ -53,7 +99,36 @@ export function CopilotTab() {
     setInputQuery('');
     setIsProcessing(true);
 
-    // 2. Execute deterministic grounded query
+    if (isSignedIn) {
+      // 2a. Server copilot: numbers are calculated server-side from your saved data.
+      let reply: CopilotMessage;
+      try {
+        const res = await api.post<ServerAnswer>('/ai/copilot', { message: text.trim() });
+        reply = {
+          id: messageId('copilot'),
+          sender: 'assistant',
+          timestamp: new Date().toISOString(),
+          content: res.answer,
+          facts: res.facts,
+          limitations: res.limitations,
+          source: res.source,
+          insights: res.insights,
+          suggestedActions: res.suggested_actions,
+        };
+      } catch (e) {
+        reply = {
+          id: messageId('copilot'),
+          sender: 'assistant',
+          timestamp: new Date().toISOString(),
+          content: e instanceof Error ? e.message : 'The copilot is unavailable right now.',
+        };
+      }
+      addCopilotMessage(reply);
+      setIsProcessing(false);
+      return;
+    }
+
+    // 2b. Demo mode (signed out): local deterministic engine over the demo data.
     setTimeout(() => {
       const response = executeCopilotQuery(text, {
         accounts,
@@ -77,15 +152,15 @@ export function CopilotTab() {
           <div className="flex items-center gap-2">
             <h1 className="text-3xl font-bold text-[#0F172A] tracking-tight">AI Financial Copilot</h1>
             <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-mono font-semibold border ${
-              preferences.isAiEnabled
+              canAsk
                 ? 'bg-sky-50 text-sky-800 border-sky-200'
                 : 'bg-rose-50 text-rose-800 border-rose-200'
             }`}>
-              {preferences.isAiEnabled ? 'Grounded Engine Active' : 'Offline Mode'}
+              {isSignedIn ? (preferences.isAiEnabled ? 'AI Wording On' : 'Calculated Answers') : preferences.isAiEnabled ? 'Demo Engine' : 'Offline Mode'}
             </span>
           </div>
           <p className="text-xs text-slate-600 font-medium mt-1">
-            Answers are calculated strictly via deterministic ledger code. Never hallucinating balances or returns.
+            Every number is calculated by WealthPilot from your ledger. The AI, when on, only words the answer.
           </p>
         </div>
 
@@ -98,8 +173,29 @@ export function CopilotTab() {
         </button>
       </div>
 
-      {/* Kill Switch Warning if disabled */}
-      {!preferences.isAiEnabled && (
+      {/* Signed in with AI wording off: calculated answers still work */}
+      {isSignedIn && !preferences.isAiEnabled && (
+        <div className="p-4 rounded-2xl bg-sky-50 border border-sky-200 flex flex-wrap items-start justify-between gap-3 text-xs text-sky-900">
+          <div className="flex items-start gap-3">
+            <Lock className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-sky-950">AI wording is off</p>
+              <p className="text-sky-800 leading-relaxed mt-0.5">
+                Answers are calculated by WealthPilot and nothing is sent to an AI provider.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setConsentOpen(true)}
+            className="px-3.5 py-1.5 rounded-full bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold cursor-pointer"
+          >
+            Turn on AI wording
+          </button>
+        </div>
+      )}
+
+      {/* Demo mode kill switch */}
+      {!isSignedIn && !preferences.isAiEnabled && (
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">
           <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <div>
@@ -152,6 +248,59 @@ export function CopilotTab() {
               >
                 <p>{msg.content}</p>
 
+                {/* Server answer: insights, facts (the only source of numbers), limitations, actions */}
+                {!isUser && msg.insights && msg.insights.length > 0 && (
+                  <ul className="space-y-1">
+                    {msg.insights.map((ins) => (
+                      <li key={ins.title}>
+                        <span className="font-semibold">{ins.title}:</span> {ins.description}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {!isUser && msg.facts && msg.facts.length > 0 && (
+                  <ul aria-label="Calculated facts" className="flex flex-wrap gap-1.5">
+                    {msg.facts.slice(0, 8).map((f) => (
+                      <li key={f.id} className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] text-slate-700">
+                        {f.label}: <span className="font-mono font-semibold">{formatFact(f)}</span>
+                        {f.kind === 'estimate' && <span className="text-amber-700"> (estimate)</span>}
+                      </li>
+                    ))}
+                    {msg.facts.length > 8 && <li className="text-[10px] text-slate-500 self-center">+{msg.facts.length - 8} more</li>}
+                  </ul>
+                )}
+                {!isUser && msg.limitations && msg.limitations.length > 0 && (
+                  <ul className="text-[10px] text-amber-800 space-y-0.5">
+                    {msg.limitations.map((l) => (
+                      <li key={l}>Note: {l}</li>
+                    ))}
+                  </ul>
+                )}
+                {!isUser && msg.suggestedActions && msg.suggestedActions.length > 0 && onNavigate && (
+                  <div className="flex flex-wrap gap-2">
+                    {msg.suggestedActions
+                      .filter((a) => ACTION_TABS[a.action])
+                      .map((a) => (
+                        <button
+                          key={a.action}
+                          onClick={() => onNavigate(ACTION_TABS[a.action])}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white hover:bg-sky-50 border border-sky-200 text-[10px] font-semibold text-sky-800 cursor-pointer"
+                        >
+                          {a.label}
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      ))}
+                  </div>
+                )}
+                {!isUser && msg.source && (
+                  <p className="pt-2 border-t border-slate-200 flex items-center gap-1 text-[10px] text-slate-500 font-medium">
+                    <CheckCircle2 className="w-3 h-3 text-sky-600" />
+                    {msg.source === 'llm:groq'
+                      ? 'Worded by AI (Groq) · every number calculated by WealthPilot'
+                      : 'Calculated by WealthPilot · no AI involved'}
+                  </p>
+                )}
+
                 {/* Evidence Citation Chip */}
                 {msg.evidence && !isUser && (
                   <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 font-medium">
@@ -195,18 +344,22 @@ export function CopilotTab() {
           placeholder="Ask Copilot a question about your finances..."
           value={inputQuery}
           onChange={(e) => setInputQuery(e.target.value)}
-          disabled={!preferences.isAiEnabled || isProcessing}
+          disabled={!canAsk || isProcessing}
+          aria-label="Ask the copilot a question"
+          maxLength={500}
           className="w-full pl-5 pr-28 py-3.5 rounded-full bg-white border border-slate-200 text-xs text-[#0F172A] placeholder-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50 font-medium"
         />
         <button
           type="submit"
-          disabled={!inputQuery.trim() || !preferences.isAiEnabled || isProcessing}
+          disabled={!inputQuery.trim() || !canAsk || isProcessing}
           className="absolute right-2 top-2 bottom-2 px-5 bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold text-xs rounded-full flex items-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer shadow-xs"
         >
           <span>Query</span>
           <Send className="w-3 h-3 text-sky-400" />
         </button>
       </form>
+
+      <AiConsentDialog isOpen={consentOpen} onClose={() => setConsentOpen(false)} onAccept={() => setPreferences({ isAiEnabled: true })} />
 
       {/* AI Disclaimer */}
       <p className="text-[11px] text-center text-slate-500 font-medium">

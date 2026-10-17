@@ -11,10 +11,7 @@ import { toClientAudit, todayIn } from '../mappers';
 import { PreferencesPatch } from '../schemas';
 import { comparePassword } from '@/lib/auth/password';
 import type { UserPreferences } from '@/types/finance';
-
-export const CURRENT_AI_NOTICE = 'ai-notice-v1';
-// Gemini free tier may not be used for these regions (Google Unpaid Services terms; CN: unreachable + PIPL).
-const GEMINI_BLOCKED_REGIONS = new Set(['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'GB', 'CH', 'CN']);
+import { CURRENT_AI_NOTICE, allowGemini } from '../ai/privacy';
 
 const profileSelect = {
   id: true,
@@ -81,7 +78,7 @@ export async function updatePreferences(userId: string, patch: z.infer<typeof Pr
 /** The ONLY write path for isAiEnabled (SEC-11). */
 export async function grantAiConsent(userId: string, providers: string[]) {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { region: true } });
-  if (providers.includes('gemini') && (!user.region || GEMINI_BLOCKED_REGIONS.has(user.region))) {
+  if (providers.includes('gemini') && !allowGemini(user)) {
     throw new HttpError('VALIDATION_ERROR', 'Gemini is not available for your region. Set your region or use Groq only.', 400);
   }
   await prisma.$transaction(async (tx) => {

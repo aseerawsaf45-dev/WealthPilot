@@ -69,13 +69,24 @@ interface FinanceContextType {
   updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
   addAccount: (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => Promise<void>;
+  updateAccount: (id: string, updates: Partial<FinancialAccount>) => Promise<boolean>;
+  /** Without `cascade`, an account with transactions returns { conflict } instead of deleting. */
+  removeAccount: (id: string, cascade?: boolean) => Promise<{ success: boolean; conflict?: string }>;
   addBudget: (bgt: Omit<BudgetCategory, 'id'>) => Promise<void>;
   updateBudget: (id: string, updates: Partial<BudgetCategory>) => Promise<void>;
+  deleteBudget: (id: string) => Promise<void>;
   addGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => Promise<void>;
   updateGoal: (id: string, updates: Partial<SavingsGoal>) => Promise<void>;
+  deleteGoal: (id: string) => Promise<void>;
+  contributeToGoal: (id: string, amountCents: number) => Promise<boolean>;
   addBill: (bill: Omit<BillSubscription, 'id' | 'userId'>) => Promise<void>;
+  updateBill: (id: string, updates: Partial<BillSubscription>) => Promise<boolean>;
+  deleteBill: (id: string) => Promise<void>;
+  payBill: (id: string) => Promise<boolean>;
   addDebt: (debt: Omit<DebtAccount, 'id' | 'userId'>) => Promise<void>;
   updateDebt: (id: string, updates: Partial<DebtAccount>) => Promise<void>;
+  deleteDebt: (id: string) => Promise<void>;
+  refreshAuditLogs: () => Promise<void>;
   commitImportedTransactions: (newTxs: NewTransaction[]) => Promise<ImportCommitResult | null>;
   rollbackImportBatch: (batchId: string) => Promise<boolean>;
   setPreferences: (prefs: Partial<UserPreferences>) => void;
@@ -111,7 +122,15 @@ function pick<T extends object>(obj: Partial<T>, keys: (keyof T)[]): Partial<T> 
   return out;
 }
 
-const UI_PREF_KEYS = ['theme', 'locale', 'dateFormat', 'reducedMotion', 'isDemoMode'] as const;
+const UI_PREF_KEYS = ['theme', 'locale', 'dateFormat', 'reducedMotion', 'isDemoMode', 'learn'] as const;
+
+/** Local copy of the server rule (src/server/repos/planning.ts nextDueAfter) for demo mode only. */
+function nextDueLocal(ymd: string, frequency: BillSubscription['frequency']): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  if (frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else d.setUTCMonth(d.getUTCMonth() + (frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12));
+  return d.toISOString().slice(0, 10);
+}
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [isReady, setIsReady] = useState(false);
@@ -166,6 +185,20 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setIsReady(true));
   }, [loadFromServer]);
 
+  // Sync: when the tab becomes visible again, reload from the server so changes made in another
+  // tab or device show up. A 401 here means the session ended elsewhere.
+  useEffect(() => {
+    if (!isAuthed) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadFromServer().catch((e) => {
+        if (e instanceof ApiError && e.status === 401) resetToSeed();
+      });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [isAuthed, loadFromServer]);
+
   /** Runs a server call; a 401 means the session ended, so drop back to demo mode. */
   const run = async (fn: () => Promise<void>): Promise<boolean> => {
     try {
@@ -214,17 +247,33 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
     if (!isAuthed) {
+      const old = transactions.find((t) => t.id === id);
+      if (old) {
+        const next = { ...old, ...updates };
+        setAccounts((prev) =>
+          prev.map((acc) => {
+            let balance = acc.balanceCents;
+            if (acc.id === old.accountId) balance -= old.amountCents;
+            if (acc.id === next.accountId) balance += next.amountCents;
+            return balance === acc.balanceCents ? acc : { ...acc, balanceCents: balance };
+          })
+        );
+      }
       setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
       return;
     }
     await run(async () => {
       const body = {
-        ...pick(updates, ['financialDate', 'merchant', 'category', 'amountCents', 'status', 'notes', 'tags', 'isTransfer']),
+        ...pick(updates, ['accountId', 'financialDate', 'merchant', 'category', 'amountCents', 'status', 'notes', 'tags', 'isTransfer']),
         ...(updates.splits && { splits: updates.splits.map((s) => ({ category: s.category, amountCents: s.amountCents, note: s.note || undefined })) }),
       };
-      const res = await api.patch<{ transaction: Transaction; account: FinancialAccount | null }>(`/transactions/${encodeURIComponent(id)}`, body);
+      const res = await api.patch<{ transaction: Transaction; account: FinancialAccount | null; previousAccount: FinancialAccount | null }>(
+        `/transactions/${encodeURIComponent(id)}`,
+        body
+      );
       setTransactions((prev) => prev.map((t) => (t.id === id ? res.transaction : t)));
       replaceAccount(res.account);
+      replaceAccount(res.previousAccount); // set when the transaction moved to another account
     });
   };
 
@@ -366,6 +415,113 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       );
       setDebts((prev) => prev.map((d) => (d.id === id ? saved : d)));
     });
+  };
+
+  const updateAccount = async (id: string, updates: Partial<FinancialAccount>): Promise<boolean> => {
+    if (!isAuthed) {
+      setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
+      return true;
+    }
+    return run(async () => {
+      const saved = await api.patch<FinancialAccount>(
+        `/accounts/${encodeURIComponent(id)}`,
+        pick(updates, ['name', 'institution', 'type', 'accountNumberMask', 'isIncludedInNetWorth', 'balanceCents'])
+      );
+      replaceAccount(saved);
+    });
+  };
+
+  const removeAccount = async (id: string, cascade = false): Promise<{ success: boolean; conflict?: string }> => {
+    const dropLocally = () => {
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+      setTransactions((prev) => prev.filter((t) => t.accountId !== id));
+      setBills((prev) => prev.map((b) => (b.accountId === id ? { ...b, accountId: '' } : b)));
+    };
+    if (!isAuthed) {
+      dropLocally();
+      return { success: true };
+    }
+    try {
+      await api.del(`/accounts/${encodeURIComponent(id)}${cascade ? '?cascade=true' : ''}`);
+      dropLocally();
+      return { success: true };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) return { success: false, conflict: e.message };
+      if (e instanceof ApiError && e.status === 401) resetToSeed();
+      setSyncError(e instanceof Error ? e.message : 'Could not delete the account.');
+      return { success: false };
+    }
+  };
+
+  const deleteBudget = async (id: string) => {
+    if (isAuthed && !(await run(async () => void (await api.del(`/budgets/${encodeURIComponent(id)}`))))) return;
+    setBudgets((prev) => prev.filter((b) => b.id !== id));
+  };
+
+  const deleteGoal = async (id: string) => {
+    if (isAuthed && !(await run(async () => void (await api.del(`/goals/${encodeURIComponent(id)}`))))) return;
+    setGoals((prev) => prev.filter((g) => g.id !== id));
+  };
+
+  const contributeToGoal = async (id: string, amountCents: number): Promise<boolean> => {
+    if (!isAuthed) {
+      setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, currentCents: Math.max(0, g.currentCents + amountCents) } : g)));
+      return true;
+    }
+    return run(async () => {
+      const saved = await api.post<SavingsGoal>(`/goals/${encodeURIComponent(id)}/contributions`, { amountCents });
+      setGoals((prev) => prev.map((g) => (g.id === id ? saved : g)));
+    });
+  };
+
+  const updateBill = async (id: string, updates: Partial<BillSubscription>): Promise<boolean> => {
+    if (!isAuthed) {
+      setBills((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates } : b)));
+      return true;
+    }
+    return run(async () => {
+      const body: Record<string, unknown> = pick(updates, ['name', 'amountCents', 'frequency', 'nextDueDate', 'category', 'accountId', 'isAutoPay']);
+      if (updates.status) body.status = updates.status === 'paused' ? 'paused' : 'active';
+      const saved = await api.patch<BillSubscription>(`/bills/${encodeURIComponent(id)}`, body);
+      setBills((prev) => prev.map((b) => (b.id === id ? saved : b)));
+    });
+  };
+
+  const deleteBill = async (id: string) => {
+    if (isAuthed && !(await run(async () => void (await api.del(`/bills/${encodeURIComponent(id)}`))))) return;
+    setBills((prev) => prev.filter((b) => b.id !== id));
+  };
+
+  /** Marks the current due date paid: records the expense (if the bill has an account) and moves to the next due date. */
+  const payBill = async (id: string): Promise<boolean> => {
+    const bill = bills.find((b) => b.id === id);
+    if (!bill) return false;
+    if (!isAuthed) {
+      setBills((prev) => prev.map((b) => (b.id === id ? { ...b, nextDueDate: nextDueLocal(b.nextDueDate, b.frequency), status: 'active' } : b)));
+      return true;
+    }
+    return run(async () => {
+      const res = await api.post<{ bill: BillSubscription; transaction: Transaction | null; accountId: string | null }>(
+        `/bills/${encodeURIComponent(id)}/pay`,
+        { dueDate: bill.nextDueDate }
+      );
+      setBills((prev) => prev.map((b) => (b.id === id ? res.bill : b)));
+      if (res.transaction) {
+        setTransactions((prev) => [res.transaction!, ...prev]);
+        // The expense changed that account's derived balance; refresh just the accounts.
+        setAccounts(await api.get<FinancialAccount[]>('/accounts'));
+      }
+    });
+  };
+
+  const deleteDebt = async (id: string) => {
+    if (isAuthed && !(await run(async () => void (await api.del(`/debts/${encodeURIComponent(id)}`))))) return;
+    setDebts((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const refreshAuditLogs = async () => {
+    if (!isAuthed) return;
+    await run(async () => setAuditLogs(await api.get<AuditEvent[]>('/audit?limit=30')));
   };
 
   const commitImportedTransactions = async (newTxs: NewTransaction[]): Promise<ImportCommitResult | null> => {
@@ -535,13 +691,23 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         updateTransaction,
         deleteTransaction,
         addAccount,
+        updateAccount,
+        removeAccount,
         addBudget,
         updateBudget,
+        deleteBudget,
         addGoal,
         updateGoal,
+        deleteGoal,
+        contributeToGoal,
         addBill,
+        updateBill,
+        deleteBill,
+        payBill,
         addDebt,
         updateDebt,
+        deleteDebt,
+        refreshAuditLogs,
         commitImportedTransactions,
         rollbackImportBatch,
         setPreferences,

@@ -5,6 +5,7 @@ import { useFinance } from '../context/FinanceContext';
 import { BillSubscription } from '../types/finance';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { BillsDrainTimelineChart } from './InteractiveCharts';
+import { RowActions } from './RowActions';
 import {
   CalendarDays,
   Plus,
@@ -15,8 +16,10 @@ import {
 } from 'lucide-react';
 
 export function BillsTab() {
-  const { bills, accounts, addBill } = useFinance();
+  const { bills, accounts, addBill, updateBill, deleteBill, payBill } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [payingId, setPayingId] = useState<string | null>(null);
 
   // Form
   const [name, setName] = useState('');
@@ -27,9 +30,53 @@ export function BillsTab() {
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [isAutoPay, setIsAutoPay] = useState(true);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setName('');
+    setAmount('');
+    setFrequency('monthly');
+    setNextDueDate('');
+    setCategory('Utilities');
+    setAccountId(accounts[0]?.id || '');
+    setIsAutoPay(true);
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (bill: BillSubscription) => {
+    setEditingId(bill.id);
+    setName(bill.name);
+    setAmount((bill.amountCents / 100).toString());
+    setFrequency(bill.frequency);
+    setNextDueDate(bill.nextDueDate);
+    setCategory(bill.category);
+    setAccountId(bill.accountId);
+    setIsAutoPay(bill.isAutoPay);
+    setIsAddOpen(true);
+  };
+
+  const handlePay = async (bill: BillSubscription) => {
+    setPayingId(bill.id); // disables the button so a double click can't send twice (the server also refuses repeats)
+    await payBill(bill.id);
+    setPayingId(null);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !amount.trim() || !nextDueDate) return;
+
+    if (editingId) {
+      const saved = await updateBill(editingId, {
+        name: name.trim(),
+        amountCents: dollarsToCents(amount),
+        frequency,
+        nextDueDate,
+        category,
+        accountId,
+        isAutoPay,
+      });
+      if (saved) setIsAddOpen(false);
+      return;
+    }
 
     addBill({
       name: name.trim(),
@@ -68,7 +115,7 @@ export function BillsTab() {
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAdd}
           className="btn-primary-anim btn-shimmer flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-sky-400" />
@@ -98,6 +145,7 @@ export function BillsTab() {
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-1">
                   <span
                     className={`text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold uppercase tracking-wider border ${
                       bill.status === 'due_soon'
@@ -109,6 +157,8 @@ export function BillsTab() {
                   >
                     {bill.status.replace('_', ' ')}
                   </span>
+                  <RowActions label={bill.name} onEdit={() => openEdit(bill)} onDelete={() => deleteBill(bill.id)} />
+                  </div>
                 </div>
 
                 <div className="pt-1">
@@ -140,6 +190,15 @@ export function BillsTab() {
                     {bill.isAutoPay ? 'Active Auto-Pay' : 'Manual Authorization'}
                   </span>
                 </div>
+                <button
+                  onClick={() => handlePay(bill)}
+                  disabled={payingId === bill.id || bill.status === 'paused'}
+                  className="w-full mt-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title={account ? 'Records the payment as an expense and moves to the next due date' : 'Moves to the next due date (no payment account to record the expense in)'}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {payingId === bill.id ? 'Saving…' : `Mark ${bill.nextDueDate} as paid`}
+                </button>
               </div>
             </div>
           );
@@ -151,7 +210,7 @@ export function BillsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-md">
           <div className="max-w-md w-full bg-white/95 backdrop-blur-2xl p-7 sm:p-8 rounded-3xl border border-white/90 shadow-2xl animate-in zoom-in-95 text-xs">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-5">
-              <h3 className="text-base font-bold text-[#0F172A]">Add Recurring Obligation</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Recurring Obligation' : 'Add Recurring Obligation'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="btn-anim text-slate-400 hover:text-slate-700 p-1 rounded-full cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
@@ -249,7 +308,7 @@ export function BillsTab() {
                   type="submit"
                   className="btn-primary-anim btn-shimmer px-6 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold shadow-md cursor-pointer"
                 >
-                  Save Commitment
+                  {editingId ? 'Save Changes' : 'Save Commitment'}
                 </button>
               </div>
             </form>

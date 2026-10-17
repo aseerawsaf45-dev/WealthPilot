@@ -8,8 +8,8 @@ import type { BillFrequency } from '@prisma/client';
 import { prisma } from '../db';
 import { writeAudit } from '../audit';
 import { HttpError } from '../http';
-import { cents, spendByCategory, toClientBudget, toClientGoal, toClientBill, toClientDebt } from '../mappers';
-import { BudgetInput, BudgetPatch, GoalInput, GoalPatch, BillInput, DebtInput, DebtPatch } from '../schemas';
+import { cents, addDays, spendByCategory, toClientBudget, toClientGoal, toClientBill, toClientDebt, toClientTransaction } from '../mappers';
+import { BudgetInput, BudgetPatch, GoalInput, GoalPatch, BillInput, BillPatch, BillPayInput, DebtInput, DebtPatch } from '../schemas';
 
 const notFound = (what: string) => new HttpError('NOT_FOUND', `${what} not found.`, 404);
 
@@ -193,4 +193,151 @@ export async function patchDebt(userId: string, id: string, patch: z.infer<typeo
     await writeAudit(tx, userId, 'DEBT_UPDATED', `debt=${id}`);
     return toClientDebt(row);
   });
+}
+
+// ---- Deletes, contributions, bill edits and payments -------------------------
+
+export async function deleteBudget(userId: string, id: string) {
+  const existing = await prisma.budgetCategory.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Budget');
+  await prisma.$transaction(async (tx) => {
+    await tx.budgetCategory.delete({ where: { id } });
+    await writeAudit(tx, userId, 'BUDGET_DELETED', `budget=${id}`);
+  });
+  return { id };
+}
+
+export async function deleteGoal(userId: string, id: string) {
+  const existing = await prisma.savingsGoal.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Goal');
+  await prisma.$transaction(async (tx) => {
+    await tx.savingsGoal.delete({ where: { id } });
+    await writeAudit(tx, userId, 'GOAL_DELETED', `goal=${id}`);
+  });
+  return { id };
+}
+
+/** Atomic add/withdraw; never below zero. shortcut: history lives in the audit log, not a GoalContribution table. */
+export async function contributeToGoal(userId: string, id: string, amountCents: number) {
+  return prisma.$transaction(async (tx) => {
+    const goal = await tx.savingsGoal.findFirst({ where: { id, userId }, select: { currentCents: true } });
+    if (!goal) throw notFound('Goal');
+    if (goal.currentCents + BigInt(amountCents) < BigInt(0)) {
+      throw new HttpError('VALIDATION_ERROR', 'You cannot withdraw more than is saved in this goal.', 400);
+    }
+    const row = await tx.savingsGoal.update({ where: { id }, data: { currentCents: { increment: BigInt(amountCents) } } });
+    await writeAudit(tx, userId, amountCents > 0 ? 'GOAL_CONTRIBUTION' : 'GOAL_WITHDRAWAL', `goal=${id}`);
+    return toClientGoal(row);
+  });
+}
+
+async function ownedAccountId(userId: string, accountId: string | undefined): Promise<string | null | undefined> {
+  if (accountId === undefined) return undefined;
+  if (accountId === '') return null;
+  const account = await prisma.financialAccount.findFirst({ where: { id: accountId, userId }, select: { id: true } });
+  if (!account) throw notFound('Account');
+  return account.id;
+}
+
+export async function patchBill(userId: string, id: string, patch: z.infer<typeof BillPatch>, today: string) {
+  const existing = await prisma.billSubscription.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Bill');
+  const accountId = await ownedAccountId(userId, patch.accountId);
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.billSubscription.update({
+      where: { id },
+      data: {
+        name: patch.name,
+        amountCents: patch.amountCents === undefined ? undefined : BigInt(patch.amountCents),
+        frequency: patch.frequency ? (patch.frequency.toUpperCase() as BillFrequency) : undefined,
+        nextDueDate: patch.nextDueDate,
+        category: patch.category,
+        accountId,
+        isAutoPay: patch.isAutoPay,
+        status: patch.status,
+      },
+    });
+    await writeAudit(tx, userId, 'BILL_UPDATED', `bill=${id} fields=${Object.keys(patch).join(',')}`);
+    return toClientBill(row, today);
+  });
+}
+
+export async function deleteBill(userId: string, id: string) {
+  const existing = await prisma.billSubscription.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Bill');
+  await prisma.$transaction(async (tx) => {
+    await tx.billSubscription.delete({ where: { id } });
+    await writeAudit(tx, userId, 'BILL_DELETED', `bill=${id}`);
+  });
+  return { id };
+}
+
+/** Next due date after `ymd` for a frequency. Month steps clamp to the month's last day (Jan 31 -> Feb 28). */
+export function nextDueAfter(ymd: string, frequency: BillFrequency): string {
+  if (frequency === 'WEEKLY') return addDays(ymd, 7);
+  if (frequency === 'BIWEEKLY') return addDays(ymd, 14);
+  const months = frequency === 'MONTHLY' ? 1 : frequency === 'QUARTERLY' ? 3 : 12;
+  const [y, m, d] = ymd.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  // shortcut: a clamped date stays clamped (Jan 31 -> Feb 28 -> Mar 28); store the original day if users notice.
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, lastDay))).toISOString().slice(0, 10);
+}
+
+/**
+ * Mark the bill due on `dueDate` as paid: advances nextDueDate and, if the bill has a payment
+ * account, records the expense, all in one transaction. The conditional update on nextDueDate
+ * makes it idempotent: a double click or a second tab gets 409 instead of a second payment.
+ */
+export async function payBill(userId: string, id: string, input: z.infer<typeof BillPayInput>, today: string) {
+  const bill = await prisma.billSubscription.findFirst({ where: { id, userId } });
+  if (!bill) throw notFound('Bill');
+
+  const result = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.billSubscription.updateMany({
+      where: { id, userId, nextDueDate: input.dueDate },
+      data: { nextDueDate: nextDueAfter(input.dueDate, bill.frequency) },
+    });
+    if (!count) throw new HttpError('CONFLICT', 'This bill was already marked as paid.', 409);
+
+    let transactionId: string | null = null;
+    if (input.recordTransaction && bill.accountId && bill.amountCents > BigInt(0)) {
+      const account = await tx.financialAccount.findFirst({ where: { id: bill.accountId, userId }, select: { currency: true } });
+      if (account) {
+        const created = await tx.transaction.create({
+          data: {
+            userId,
+            accountId: bill.accountId,
+            financialDate: today,
+            merchant: bill.name,
+            normalizedMerchant: bill.name.trim(),
+            category: bill.category,
+            amountCents: -bill.amountCents,
+            currency: account.currency,
+            source: 'MANUAL',
+            notes: `Bill payment (due ${input.dueDate})`,
+            tags: ['bill_payment'],
+          },
+          select: { id: true },
+        });
+        transactionId = created.id;
+      }
+    }
+    await writeAudit(tx, userId, 'BILL_PAID', `bill=${id}${transactionId ? ` transaction=${transactionId}` : ''}`);
+    return { transactionId, row: await tx.billSubscription.findUniqueOrThrow({ where: { id } }) };
+  });
+
+  const transaction = result.transactionId
+    ? await prisma.transaction.findFirst({ where: { id: result.transactionId, userId }, include: { splits: true } })
+    : null;
+  return { bill: toClientBill(result.row, today), transaction: transaction ? toClientTransaction(transaction) : null, accountId: bill.accountId };
+}
+
+export async function deleteDebt(userId: string, id: string) {
+  const existing = await prisma.debtAccount.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Debt');
+  await prisma.$transaction(async (tx) => {
+    await tx.debtAccount.delete({ where: { id } });
+    await writeAudit(tx, userId, 'DEBT_DELETED', `debt=${id}`);
+  });
+  return { id };
 }

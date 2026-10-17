@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { exportTransactionsToCsv } from '../services/importService';
+import { AiConsentDialog } from './AiConsentDialog';
 import {
   ShieldCheck,
   Download,
@@ -35,10 +36,18 @@ export function SettingsTab() {
     resetToDemoData,
     clearAllUserData,
     deleteAccount,
+    refreshAuditLogs,
   } = useFinance();
+
+  // Show the latest audit events (every change made since sign-in) whenever Settings opens.
+  useEffect(() => {
+    void refreshAuditLogs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per visit, not on every render
+  }, []);
 
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
+  const [aiConsentOpen, setAiConsentOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
@@ -200,18 +209,26 @@ export function SettingsTab() {
               </div>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed mb-6 font-medium">
-              WealthPilot Copilot relies strictly on deterministic ledger aggregation. Disabling AI completely suppresses the copilot assistant across all interfaces.
+              The Copilot calculates every number from your ledger. AI wording is optional: when it is off, the Copilot still answers with calculated results and nothing is sent to an AI provider.
             </p>
           </div>
 
           <div className="space-y-4 pt-4 border-t border-black/[0.05]">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold text-[#0F172A]">Enable AI Copilot</p>
-                <p className="text-[11px] text-slate-500 font-medium">Assists with calculations and natural queries</p>
+                <p className="text-xs font-bold text-[#0F172A]">AI wording (Groq)</p>
+                <p className="text-[11px] text-slate-500 font-medium">Off: answers are calculated only, nothing leaves WealthPilot</p>
               </div>
               <button
-                onClick={() => setPreferences({ isAiEnabled: !preferences.isAiEnabled })}
+                role="switch"
+                aria-checked={preferences.isAiEnabled}
+                aria-label="AI wording"
+                onClick={() =>
+                  // Signed in, turning AI on requires the consent notice; turning it off is immediate.
+                  preferences.isAuthenticated && !preferences.isAiEnabled
+                    ? setAiConsentOpen(true)
+                    : setPreferences({ isAiEnabled: !preferences.isAiEnabled })
+                }
                 className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
                   preferences.isAiEnabled ? 'bg-sky-500' : 'bg-slate-300'
                 }`}
@@ -470,6 +487,8 @@ export function SettingsTab() {
           )}
         </div>
       </section>
+
+      <AiConsentDialog isOpen={aiConsentOpen} onClose={() => setAiConsentOpen(false)} onAccept={() => setPreferences({ isAiEnabled: true })} />
 
       {/* Delete Confirmation Modal */}
       {isDeleteModalOpen && (

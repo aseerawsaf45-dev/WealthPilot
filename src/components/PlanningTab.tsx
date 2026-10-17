@@ -6,6 +6,7 @@ import { DebtAccount } from '../types/finance';
 import { calculateDebtPayoffSchedule } from '../services/debtService';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { DebtPayoffTrajectoryChart } from './InteractiveCharts';
+import { RowActions } from './RowActions';
 import {
   TrendingDown,
   Sparkles,
@@ -19,9 +20,10 @@ import {
 } from 'lucide-react';
 
 export function PlanningTab() {
-  const { debts, addDebt } = useFinance();
+  const { debts, addDebt, updateDebt, deleteDebt } = useFinance();
   const [extraPaymentDollars, setExtraPaymentDollars] = useState(250);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // New Debt Form
   const [name, setName] = useState('');
@@ -37,9 +39,41 @@ export function PlanningTab() {
   const interestSavedCents = Math.max(0, snowballSchedule.totalInterestPaidCents - avalancheSchedule.totalInterestPaidCents);
   const totalDebtCents = debts.reduce((s, d) => s + d.balanceCents, 0);
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setName('');
+    setBalance('');
+    setApr('');
+    setMinPayment('');
+    setCategory('credit_card');
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (d: DebtAccount) => {
+    setEditingId(d.id);
+    setName(d.name);
+    setBalance((d.balanceCents / 100).toString());
+    setApr(d.aprPercent.toString());
+    setMinPayment((d.minimumPaymentCents / 100).toString());
+    setCategory(d.category);
+    setIsAddOpen(true);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !balance.trim()) return;
+
+    if (editingId) {
+      await updateDebt(editingId, {
+        name: name.trim(),
+        balanceCents: dollarsToCents(balance),
+        aprPercent: parseFloat(apr) || 0,
+        minimumPaymentCents: dollarsToCents(minPayment || '25'),
+        category,
+      });
+      setIsAddOpen(false);
+      return;
+    }
 
     addDebt({
       name: name.trim(),
@@ -69,7 +103,7 @@ export function PlanningTab() {
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAdd}
           className="btn-primary-anim btn-shimmer flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-sky-400" />
@@ -124,6 +158,35 @@ export function PlanningTab() {
             interestSavedCents={interestSavedCents}
           />
         </div>
+      </div>
+
+      {/* Liabilities list (edit / delete) */}
+      <div className="keel-card p-6 sm:p-7">
+        <h2 className="text-sm font-bold text-[#0F172A] mb-3">Your Liabilities</h2>
+        {debts.length === 0 ? (
+          <p className="text-xs text-slate-500 font-medium">No debts recorded. Use Add Liability to compare payoff strategies.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {debts.map((d) => (
+              <li key={d.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div>
+                  <p className="font-bold text-[#0F172A]">{d.name}</p>
+                  <p className="text-[11px] text-slate-500 font-medium capitalize">{d.category.replace('_', ' ')}</p>
+                </div>
+                <div className="flex items-center gap-4 font-medium text-slate-600">
+                  <span>
+                    Balance <span className="font-money font-bold text-rose-700">{formatMoney(d.balanceCents)}</span>
+                  </span>
+                  <span>APR <span className="font-mono font-bold text-slate-900">{d.aprPercent}%</span></span>
+                  <span>
+                    Min <span className="font-money font-bold text-slate-900">{formatMoney(d.minimumPaymentCents)}</span>
+                  </span>
+                  <RowActions label={d.name} onEdit={() => openEdit(d)} onDelete={() => deleteDebt(d.id)} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Strategy Comparison Cards */}
@@ -249,7 +312,7 @@ export function PlanningTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-md">
           <div className="max-w-md w-full bg-white/95 backdrop-blur-2xl p-7 sm:p-8 rounded-3xl border border-white/90 shadow-2xl animate-in zoom-in-95 text-xs">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-5">
-              <h3 className="text-base font-bold text-[#0F172A]">Add Debt Liability</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Debt Liability' : 'Add Debt Liability'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="btn-anim text-slate-400 hover:text-slate-700 p-1 rounded-full cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
@@ -320,7 +383,7 @@ export function PlanningTab() {
                   type="submit"
                   className="btn-primary-anim btn-shimmer px-6 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold shadow-md cursor-pointer"
                 >
-                  Add Liability
+                  {editingId ? 'Save Changes' : 'Add Liability'}
                 </button>
               </div>
             </form>

@@ -19,6 +19,7 @@ import {
   Tag,
   AlertTriangle,
   X,
+  Pencil,
 } from 'lucide-react';
 
 export function TransactionsTab() {
@@ -37,6 +38,7 @@ export function TransactionsTab() {
 
   // Modals state
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [splitModalTx, setSplitModalTx] = useState<Transaction | null>(null);
 
   // New Transaction Form State
@@ -71,12 +73,48 @@ export function TransactionsTab() {
   const totalOutflowCents = filteredTxs.filter((t) => t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
   const netFlowCents = totalInflowCents - totalOutflowCents;
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setFormMerchant('');
+    setFormAmount('');
+    setFormType('expense');
+    setFormCategory('General');
+    setFormAccount(accounts[0]?.id || '');
+    setFormNotes('');
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (t: Transaction) => {
+    setEditingId(t.id);
+    setFormDate(t.financialDate);
+    setFormMerchant(t.merchant);
+    setFormAmount((Math.abs(t.amountCents) / 100).toFixed(2));
+    setFormType(t.amountCents < 0 ? 'expense' : 'income');
+    setFormCategory(t.category);
+    setFormAccount(t.accountId);
+    setFormNotes(t.notes ?? '');
+    setIsAddOpen(true);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formMerchant.trim() || !formAmount.trim()) return;
 
     const baseCents = dollarsToCents(formAmount);
     const amountCents = formType === 'expense' ? -Math.abs(baseCents) : Math.abs(baseCents);
+
+    if (editingId) {
+      await updateTransaction(editingId, {
+        accountId: formAccount,
+        financialDate: formDate,
+        merchant: formMerchant.trim(),
+        category: formCategory,
+        amountCents,
+        notes: formNotes.trim(),
+      });
+      setIsAddOpen(false);
+      return;
+    }
 
     addTransaction({
       accountId: formAccount,
@@ -177,7 +215,7 @@ export function TransactionsTab() {
             <span>Export CSV</span>
           </button>
           <button
-            onClick={() => setIsAddOpen(true)}
+            onClick={openAdd}
             className="btn-primary-anim btn-shimmer flex items-center gap-2 px-6 py-2.5 rounded-full text-white font-bold text-xs cursor-pointer shadow-md"
           >
             <Plus className="w-4 h-4 text-sky-400" />
@@ -335,6 +373,14 @@ export function TransactionsTab() {
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5 opacity-80 group-hover:opacity-100">
                           <button
+                            onClick={() => openEdit(t)}
+                            title="Edit transaction"
+                            aria-label={`Edit ${t.merchant}`}
+                            className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-500 hover:text-black transition-colors cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => handleOpenSplitModal(t)}
                             title="Split transaction"
                             className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-500 hover:text-black transition-colors cursor-pointer"
@@ -342,7 +388,10 @@ export function TransactionsTab() {
                             <Split className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => deleteTransaction(t.id)}
+                            onClick={() => {
+                              if (window.confirm(`Delete "${t.merchant}"? This cannot be undone.`)) deleteTransaction(t.id);
+                            }}
+                            aria-label={`Delete ${t.merchant}`}
                             title="Delete transaction"
                             className="p-1.5 rounded-lg hover:bg-rose-50 text-neutral-400 hover:text-rose-600 transition-colors cursor-pointer"
                           >
@@ -364,7 +413,7 @@ export function TransactionsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="max-w-md w-full keel-card bg-white p-6 shadow-2xl animate-in zoom-in-95 border border-black/[0.08]">
             <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] mb-4">
-              <h3 className="text-base font-bold text-[#0F172A]">Record Transaction</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Transaction' : 'Record Transaction'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="text-slate-500 hover:text-black">
                 <X className="w-4 h-4" />
               </button>
@@ -482,7 +531,7 @@ export function TransactionsTab() {
                   type="submit"
                   className="px-5 py-2 rounded-full bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold shadow-md cursor-pointer"
                 >
-                  Confirm & Post
+                  {editingId ? 'Save Changes' : 'Confirm & Post'}
                 </button>
               </div>
             </form>
