@@ -41,5 +41,5 @@ export interface CopilotAnswer extends LlmNarration {
   period: { start: string; end: string } | null;
   facts: Fact[];
   limitations: string[];
-  source: 'rules' | 'llm:groq';
+  source: 'rules' | 'llm:groq' | 'llm:gemini';
 }

@@ -6,6 +6,7 @@ import { SavingsGoal } from '../types/finance';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { GoalTrajectoryChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
+import { GoalPlanDialog } from './GoalPlanDialog';
 import {
   Target,
   Plus,
@@ -22,6 +23,7 @@ export function GoalsTab() {
   const { goals, addGoal, updateGoal, deleteGoal, contributeToGoal } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [planGoal, setPlanGoal] = useState<SavingsGoal | null>(null);
 
   // Add Goal Form State
   const [name, setName] = useState('');
@@ -118,7 +120,7 @@ export function GoalsTab() {
       <GoalTrajectoryChart goals={goals} />
 
       {/* Goals Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div className="wp-stagger grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {goals.map((g) => {
           const percent = Math.min(100, Math.round((g.currentCents / g.targetCents) * 100));
           const remainingCents = Math.max(0, g.targetCents - g.currentCents);
@@ -203,10 +205,19 @@ export function GoalsTab() {
                   )}
                 </button>
               </div>
+              <button
+                onClick={() => setPlanGoal(g)}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                AI plan: can I reach this in time?
+              </button>
             </div>
           );
         })}
       </div>
+
+      {planGoal && <GoalPlanDialog goal={planGoal} onClose={() => setPlanGoal(null)} />}
 
       {/* Add Goal Modal */}
       {isAddOpen && (

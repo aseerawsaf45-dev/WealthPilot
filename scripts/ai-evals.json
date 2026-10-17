@@ -201,7 +201,7 @@
         "facts": {
           "Emergency Fund saved": 400000,
           "Emergency Fund funded": 40,
-          "Emergency Fund needed per month": 50000
+          "Emergency Fund needed per month": 54546
         },
         "answerExcludes": [
           "Vacation"
@@ -446,7 +446,7 @@
       "gate": {
         "isAiEnabled": false,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v1",
+        "aiConsentVersion": "ai-notice-v2",
         "aiProviders": [
           "groq"
         ],
@@ -460,7 +460,7 @@
       "gate": {
         "isAiEnabled": true,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v0",
+        "aiConsentVersion": "ai-notice-v1",
         "aiProviders": [
           "groq"
         ],
@@ -474,7 +474,7 @@
       "gate": {
         "isAiEnabled": true,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v1",
+        "aiConsentVersion": "ai-notice-v2",
         "aiProviders": [
           "groq"
         ],
@@ -488,7 +488,7 @@
       "gate": {
         "isAiEnabled": true,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v1",
+        "aiConsentVersion": "ai-notice-v2",
         "aiProviders": [
           "groq",
           "gemini"
@@ -503,7 +503,7 @@
       "gate": {
         "isAiEnabled": true,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v1",
+        "aiConsentVersion": "ai-notice-v2",
         "aiProviders": [
           "groq",
           "gemini"
@@ -518,7 +518,7 @@
       "gate": {
         "isAiEnabled": true,
         "aiConsentAt": "2026-10-17",
-        "aiConsentVersion": "ai-notice-v1",
+        "aiConsentVersion": "ai-notice-v2",
         "aiProviders": [
           "groq",
           "gemini"
@@ -558,6 +558,21 @@
           "For 2026-10-01 to 2026-10-17:"
         ]
       }
+    },
+    {
+      "id": "gate-gemini-other-eu",
+      "gate": {
+        "isAiEnabled": true,
+        "aiConsentAt": "2026-10-17",
+        "aiConsentVersion": "ai-notice-v2",
+        "aiProviders": [
+          "groq",
+          "gemini"
+        ],
+        "region": "EU"
+      },
+      "provider": "gemini",
+      "expectAllowed": false
     }
   ]
 }

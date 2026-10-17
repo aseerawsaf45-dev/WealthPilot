@@ -310,6 +310,32 @@ export function SettingsTab() {
                 </select>
               </div>
 
+              {preferences.isAuthenticated && (
+                <div>
+                  <label htmlFor="region-select" className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Country (decides which AI providers may be used)
+                  </label>
+                  <select
+                    id="region-select"
+                    value={preferences.region ?? ''}
+                    onChange={(e) => setPreferences({ region: e.target.value || null })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  >
+                    <option value="">Not set (strictest privacy rules)</option>
+                    {[
+                      ['BD', 'Bangladesh'], ['CN', 'China'], ['IN', 'India'], ['PK', 'Pakistan'], ['SG', 'Singapore'], ['MY', 'Malaysia'],
+                      ['AE', 'United Arab Emirates'], ['SA', 'Saudi Arabia'], ['JP', 'Japan'], ['KR', 'South Korea'], ['AU', 'Australia'],
+                      ['CA', 'Canada'], ['US', 'United States'], ['GB', 'United Kingdom'], ['DE', 'Germany'], ['FR', 'France'],
+                      ['CH', 'Switzerland'], ['OTHER_EU', 'Other EU / EEA country'],
+                    ].map(([code, name]) => (
+                      <option key={code} value={code === 'OTHER_EU' ? 'EU' : code}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pt-2">
                 <div>
                   <p className="text-xs font-bold text-[#0F172A]">Reduced Motion Mode</p>
@@ -488,7 +514,7 @@ export function SettingsTab() {
         </div>
       </section>
 
-      <AiConsentDialog isOpen={aiConsentOpen} onClose={() => setAiConsentOpen(false)} onAccept={() => setPreferences({ isAiEnabled: true })} />
+      <AiConsentDialog isOpen={aiConsentOpen} onClose={() => setAiConsentOpen(false)} />
 
       {/* Delete Confirmation Modal */}
       {isDeleteModalOpen && (

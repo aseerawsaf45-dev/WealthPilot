@@ -32,6 +32,8 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    // Default 5 s expired real edits (each write is ~6–9 round trips; ~0.5 s each from far-away clients) → P2028 → 500.
+    transactionOptions: { maxWait: 10_000, timeout: 30_000 },
   });
 
 if (process.env.NODE_ENV !== 'production') {

@@ -168,7 +168,8 @@ export async function updateTransaction(userId: string, id: string, patch: z.inf
   if (patch.splits?.length) {
     const check = assertSoxSplitPreservation(amountCents, patch.splits);
     if (!check.compliant) throw new HttpError('VALIDATION_ERROR', 'Split amounts must add up exactly to the transaction amount.', 400);
-  } else if (patch.amountCents !== undefined && existing.splits.length && patch.splits === undefined) {
+  } else if (patch.amountCents !== undefined && patch.amountCents !== Number(existing.amountCents) && existing.splits.length && patch.splits === undefined) {
+    // The edit form always sends the amount; only a CHANGED amount would break the split total.
     throw new HttpError('VALIDATION_ERROR', 'This transaction is split. Update the splits together with the amount.', 400);
   }
 

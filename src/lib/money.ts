@@ -1,3 +1,4 @@
+import type { CopilotFact } from '../types/finance';
 // Exact financial mathematics and currency formatting using integer minor units (cents)
 
 export function formatMoney(cents: number, currency = 'USD'): string {
@@ -116,4 +117,20 @@ export function sanitizeCsvCell(value: string | number | null | undefined): stri
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+/** Formats a server-calculated copilot/planner fact for display (the only source of numbers in AI answers). */
+export function formatFact(f: CopilotFact): string {
+  switch (f.unit) {
+    case 'cents':
+      return formatMoney(Number(f.value), f.currency);
+    case 'pct':
+      return `${f.value}%`;
+    case 'days':
+      return `${f.value} days`;
+    case 'months':
+      return Number(f.value) === 1 ? '1 month' : `${f.value} months`;
+    default:
+      return String(f.value);
+  }
 }

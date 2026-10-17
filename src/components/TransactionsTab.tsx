@@ -315,7 +315,7 @@ export function TransactionsTab() {
                 <th className="py-3 px-4 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-black/[0.05]">
+            <tbody className="wp-stagger divide-y divide-black/[0.05]">
               {filteredTxs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-12 text-center text-neutral-400">

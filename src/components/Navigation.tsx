@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
+import { formatMoney } from '../lib/money';
 import {
   LayoutDashboard,
   Receipt,
@@ -25,6 +26,9 @@ import {
   Trash2,
   Shield,
   CheckCircle,
+  Cloud,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -42,11 +46,88 @@ export function Navigation({
   onOpenLanding,
   onOpenAuth,
 }: NavigationProps) {
-  const { preferences, logout } = useFinance();
+  const { preferences, logout, bills, budgets, isSaving } = useFinance();
   const displayName = preferences?.userName?.trim() || 'User';
   const displayEmail = preferences?.userEmail?.trim() || 'aseer@wealthpilot.app';
+  const isSignedIn = preferences.isAuthenticated === true;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const menusRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, visible: false });
+  const [navOverflows, setNavOverflows] = useState(false);
+
+  // Alerts for the bell: overdue / due-soon bills and budgets over (or near) their limit.
+  const alerts = [
+    ...bills
+      .filter((b) => b.status === 'overdue' || b.status === 'due_soon')
+      .map((b) => ({
+        id: `bill-${b.id}`,
+        tab: 'bills',
+        urgent: b.status === 'overdue',
+        title: b.status === 'overdue' ? `${b.name} is overdue` : `${b.name} is due soon`,
+        detail: `${formatMoney(b.amountCents)} · due ${b.nextDueDate}`,
+      })),
+    ...budgets
+      .filter((b) => b.allocatedCents > 0 && (b.spentCents * 100) / b.allocatedCents >= b.alertThresholdPercent)
+      .map((b) => ({
+        id: `budget-${b.id}`,
+        tab: 'budgets',
+        urgent: b.spentCents > b.allocatedCents,
+        title: b.spentCents > b.allocatedCents ? `${b.category} is over budget` : `${b.category} is close to its limit`,
+        detail: `${formatMoney(b.spentCents)} of ${formatMoney(b.allocatedCents)}`,
+      })),
+  ];
+  const urgentCount = alerts.filter((a) => a.urgent).length;
+
+  // Compact, stronger header once the page scrolls.
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Sliding active-tab indicator: measure the active button (re-measure on resize).
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const measure = () => {
+      const btn = nav.querySelector<HTMLElement>(`[data-tab="${activeTab}"]`);
+      setIndicator(btn ? { left: btn.offsetLeft, width: btn.offsetWidth, visible: true } : (prev) => ({ ...prev, visible: false }));
+      btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      setNavOverflows(nav.scrollWidth > nav.clientWidth + 1);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(nav);
+    return () => ro.disconnect();
+  }, [activeTab]);
+
+  // Menus close on Escape and on clicks outside them.
+  useEffect(() => {
+    if (!userMenuOpen && !bellOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setUserMenuOpen(false);
+        setBellOpen(false);
+      }
+    };
+    const onClick = (e: MouseEvent) => {
+      if (!menusRef.current?.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+        setBellOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [userMenuOpen, bellOpen]);
 
   // Optimized primary navigation items
   const navItems = [
@@ -70,8 +151,16 @@ export function Navigation({
   return (
     <>
       {/* Optimized Top Header Bar (Sleek 64px / h-16 Glassmorphism Architecture) */}
-      <header className="sticky top-0 z-40 w-full glass-nav border-b border-slate-200/70">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4">
+      <header
+        className={`sticky top-0 z-40 w-full glass-nav border-b border-slate-200/70 transition-shadow duration-300 ${
+          scrolled ? 'shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)]' : ''
+        }`}
+      >
+        <div
+          className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 sm:gap-4 transition-[height] duration-300 ${
+            scrolled ? 'h-14' : 'h-16'
+          }`}
+        >
           
           {/* Left Brand Identity: Compact Geometric Logo + Title */}
           <div
@@ -97,19 +186,28 @@ export function Navigation({
 
           {/* Center Navigation Pills (Optimized Sleek Segmented Bar for Desktop/Laptop) */}
           <nav
+            ref={navRef}
             aria-label="Primary navigation"
-            className="hidden md:flex items-center p-1 rounded-full glass-segmented gap-0.5 overflow-x-auto scrollbar-none"
+            className={`relative hidden md:flex min-w-0 flex-1 max-w-fit items-center p-1 rounded-full glass-segmented gap-0.5 overflow-x-auto scrollbar-none ${
+              navOverflows ? '[mask-image:linear-gradient(to_right,black_85%,transparent)]' : ''
+            }`}
           >
+            {/* One pill that slides to the active tab */}
+            <span
+              aria-hidden="true"
+              className="absolute top-1 bottom-1 left-0 rounded-full bg-[#0F172A] shadow-[0_4px_14px_-4px_rgba(15,23,42,0.45)] transition-[transform,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+              style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width, opacity: indicator.visible ? 1 : 0 }}
+            />
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
                 <button
                   key={item.id}
+                  data-tab={item.id}
+                  aria-current={isActive ? 'page' : undefined}
                   onClick={() => handleSelectTab(item.id)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer flex-shrink-0 whitespace-nowrap btn-anim flex items-center gap-1 ${
-                    isActive
-                      ? 'bg-[#0F172A] text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/80'
+                  className={`relative z-10 px-3 py-1.5 text-xs font-bold rounded-full transition-colors duration-200 cursor-pointer flex-shrink-0 whitespace-nowrap flex items-center gap-1 ${
+                    isActive ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   <span>{item.label}</span>
@@ -128,7 +226,34 @@ export function Navigation({
           </nav>
 
           {/* Right Action Controls: Quick Record + Settings + Profile + Mobile Toggle */}
-          <div className="flex items-center gap-2">
+          <div ref={menusRef} className="flex items-center gap-2">
+            {/* Save status: where the data lives and whether a save is in flight */}
+            <span
+              role="status"
+              aria-live="polite"
+              className={`hidden xl:inline-flex whitespace-nowrap items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold transition-colors duration-300 ${
+                !isSignedIn
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : isSaving
+                    ? 'bg-sky-50 border-sky-200 text-sky-800'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              }`}
+            >
+              {!isSignedIn ? (
+                <>Demo · not saved</>
+              ) : isSaving ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <Cloud className="w-3 h-3" />
+                  Saved
+                </>
+              )}
+            </span>
+
             {/* Quick Record Button */}
             {openAddTxModal && (
               <button
@@ -153,30 +278,87 @@ export function Navigation({
               <Settings className="w-4 h-4" />
             </button>
 
-            {/* Notification Bell */}
-            <button
-              className="p-2 rounded-full btn-glass-anim text-slate-600 hover:text-slate-900 shadow-2xs cursor-pointer"
-              title="Notifications"
-            >
-              <Bell className="w-4 h-4" />
-            </button>
+            {/* Notification Bell: real alerts from bills and budgets */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setBellOpen(!bellOpen);
+                  setUserMenuOpen(false);
+                }}
+                aria-label={`Notifications${alerts.length ? ` (${alerts.length})` : ''}`}
+                aria-expanded={bellOpen}
+                aria-haspopup="true"
+                className="relative p-2 rounded-full btn-glass-anim text-slate-600 hover:text-slate-900 shadow-2xs cursor-pointer"
+                title="Notifications"
+              >
+                <Bell className="w-4 h-4" />
+                {alerts.length > 0 && (
+                  <span
+                    className={`wp-ping absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${
+                      urgentCount ? 'bg-rose-500' : 'bg-amber-500'
+                    }`}
+                  >
+                    {alerts.length}
+                  </span>
+                )}
+              </button>
+
+              {bellOpen && (
+                <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] bg-white/95 backdrop-blur-2xl rounded-2xl border border-slate-200/90 shadow-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <p className="px-3 pt-2 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">Alerts</p>
+                  {alerts.length === 0 ? (
+                    <div className="flex items-center gap-2 px-3 py-4 text-xs font-semibold text-emerald-700">
+                      <CheckCircle className="w-4 h-4" />
+                      All clear: no bills due soon and every budget is on track.
+                    </div>
+                  ) : (
+                    <ul className="wp-stagger max-h-80 overflow-y-auto">
+                      {alerts.map((a) => (
+                        <li key={a.id}>
+                          <button
+                            onClick={() => {
+                              handleSelectTab(a.tab);
+                              setBellOpen(false);
+                            }}
+                            className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-xl text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                          >
+                            <AlertTriangle className={`w-4 h-4 mt-0.5 flex-shrink-0 ${a.urgent ? 'text-rose-600' : 'text-amber-600'}`} />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold text-slate-900 truncate">{a.title}</span>
+                              <span className="block text-[11px] text-slate-500 font-medium">{a.detail}</span>
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 mt-0.5 ml-auto flex-shrink-0 text-slate-400" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Public Landing Page Button */}
             {onOpenLanding && (
               <button
                 onClick={onOpenLanding}
-                className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/90 hover:bg-slate-100 text-slate-700 hover:text-black text-xs font-bold transition-all cursor-pointer border border-slate-200/80 shadow-2xs hover:scale-102"
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white/90 hover:bg-slate-100 text-slate-700 hover:text-black text-xs font-bold transition-all cursor-pointer border border-slate-200/80 shadow-2xs hover:scale-102 whitespace-nowrap"
                 title="View Public Marketing Landing Page"
+                aria-label="Landing page"
               >
                 <Globe className="w-3.5 h-3.5 text-sky-600" />
-                <span>Landing Page</span>
+                <span className="hidden 2xl:inline">Landing Page</span>
               </button>
             )}
 
             {/* User Profile Pill / Dropdown Trigger */}
             <div className="relative">
               <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                onClick={() => {
+                  setUserMenuOpen(!userMenuOpen);
+                  setBellOpen(false);
+                }}
+                aria-expanded={userMenuOpen}
+                aria-haspopup="true"
                 className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-slate-100/90 hover:bg-slate-200/90 border border-slate-200/80 cursor-pointer transition-all hover:scale-[1.02]"
                 title={`Account: ${displayName} (${displayEmail})`}
               >
@@ -201,9 +383,13 @@ export function Navigation({
                         <p className="text-[11px] font-mono text-slate-500 truncate">{displayEmail}</p>
                       </div>
                     </div>
-                    <div className="mt-2.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>Neon PostgreSQL Enclave</span>
+                    <div
+                      className={`mt-2.5 flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                        isSignedIn ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isSignedIn ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                      <span>{isSignedIn ? 'Saved to your account (Neon Postgres)' : 'Demo mode: nothing is saved'}</span>
                     </div>
                   </div>
 
@@ -262,6 +448,7 @@ export function Navigation({
             {/* Mobile Menu Hamburger Toggle */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-expanded={mobileMenuOpen}
               className="md:hidden p-2 rounded-xl btn-glass-anim text-slate-700 hover:text-black cursor-pointer shadow-2xs"
               aria-label="Toggle navigation menu"
             >
@@ -285,8 +472,9 @@ export function Navigation({
                   return (
                     <button
                       key={item.id}
+                      aria-current={isActive ? 'page' : undefined}
                       onClick={() => handleSelectTab(item.id)}
-                      className={`flex items-center justify-between p-2.5 rounded-xl transition-all cursor-pointer text-xs font-bold border btn-anim ${
+                      className={`min-h-11 flex items-center justify-between p-2.5 rounded-xl transition-all cursor-pointer text-xs font-bold border btn-anim ${
                         isActive
                           ? 'bg-[#0F172A] text-white border-[#0F172A] shadow-xs'
                           : 'bg-white text-slate-700 border-slate-200/70 hover:bg-slate-50 hover:text-black'
@@ -372,8 +560,9 @@ export function Navigation({
           return (
             <button
               key={item.id}
+              aria-current={isActive ? 'page' : undefined}
               onClick={() => handleSelectTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-11 min-w-11 flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer ${
                 isActive
                   ? 'text-sky-600 bg-sky-50 font-bold'
                   : 'text-slate-600 hover:text-black font-semibold'

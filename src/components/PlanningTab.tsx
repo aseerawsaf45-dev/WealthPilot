@@ -166,7 +166,7 @@ export function PlanningTab() {
         {debts.length === 0 ? (
           <p className="text-xs text-slate-500 font-medium">No debts recorded. Use Add Liability to compare payoff strategies.</p>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="wp-stagger divide-y divide-slate-100">
             {debts.map((d) => (
               <li key={d.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div>

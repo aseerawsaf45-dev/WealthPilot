@@ -127,7 +127,7 @@ export function BillsTab() {
       <BillsDrainTimelineChart bills={bills} checkingBalanceCents={checkingBalanceCents} />
 
       {/* Bills Timeline Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="wp-stagger grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {bills.map((bill) => {
           const account = accounts.find((a) => a.id === bill.accountId);
 

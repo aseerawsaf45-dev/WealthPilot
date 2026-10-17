@@ -61,6 +61,8 @@ interface FinanceContextType {
   auditLogs: AuditEvent[];
   copilotHistory: CopilotMessage[];
   isReady: boolean;
+  /** True while a save is in flight (signed in). */
+  isSaving: boolean;
   syncError: string | null;
   clearSyncError: () => void;
 
@@ -135,6 +137,7 @@ function nextDueLocal(ymd: string, frequency: BillSubscription['frequency']): st
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [isReady, setIsReady] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [accounts, setAccounts] = useState<FinancialAccount[]>(initialAccounts);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [budgets, setBudgets] = useState<BudgetCategory[]>(initialBudgets);
@@ -201,6 +204,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   /** Runs a server call; a 401 means the session ended, so drop back to demo mode. */
   const run = async (fn: () => Promise<void>): Promise<boolean> => {
+    setPendingCount((n) => n + 1); // drives the navbar "Saving…" indicator
     try {
       await fn();
       return true;
@@ -208,6 +212,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       if (e instanceof ApiError && e.status === 401) resetToSeed();
       setSyncError(e instanceof Error ? e.message : 'Something went wrong.');
       return false;
+    } finally {
+      setPendingCount((n) => n - 1);
     }
   };
 
@@ -589,16 +595,28 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
     // AI is opt-in and has its own consent endpoint (never part of the preferences PATCH).
     if (prefs.isAiEnabled !== undefined) {
-      void run(async () => {
-        if (prefs.isAiEnabled) await api.post('/user/ai-consent', { providers: ['groq'] });
-        else await api.del('/user/ai-consent');
-      });
+      void (async () => {
+        const ok = await run(async () => {
+          if (!prefs.isAiEnabled) {
+            await api.del('/user/ai-consent');
+            return;
+          }
+          // The server checks the saved region before allowing Gemini, so save pending changes first.
+          if (prefsTimer.current) clearTimeout(prefsTimer.current);
+          const pending = pendingPrefs.current;
+          pendingPrefs.current = {};
+          if (Object.keys(pending).length) await api.patch('/user/preferences', pending);
+          await api.post('/user/ai-consent', { providers: prefs.aiProviders?.length ? prefs.aiProviders : ['groq'] });
+        });
+        if (!ok && prefs.isAiEnabled) setPreferencesState((prev) => ({ ...prev, isAiEnabled: false, aiProviders: [] }));
+      })();
     }
 
     const p = pendingPrefs.current;
     if (prefs.userName !== undefined && prefs.userName.trim()) p.name = prefs.userName.trim();
     if (prefs.baseCurrency !== undefined) p.preferredCurrency = prefs.baseCurrency;
     if (prefs.timezone !== undefined) p.timezone = prefs.timezone;
+    if (prefs.region !== undefined) p.region = prefs.region;
     if (prefs.autoCategorizationRules !== undefined) {
       p.categorizationRules = prefs.autoCategorizationRules.map((r) => ({ keyword: r.keyword, category: r.category }));
     }
@@ -685,6 +703,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         auditLogs,
         copilotHistory,
         isReady,
+        isSaving: pendingCount > 0,
         syncError,
         clearSyncError: () => setSyncError(null),
         addTransaction,

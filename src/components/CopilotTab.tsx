@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { executeCopilotQuery } from '../services/copilotService';
 import { api } from '../lib/api';
-import { formatMoney } from '../lib/money';
+import { formatFact } from '../lib/money';
 import { AiConsentDialog } from './AiConsentDialog';
 import type { CopilotFact, CopilotMessage } from '../types/finance';
 import {
@@ -40,20 +40,6 @@ const ACTION_TABS: Record<string, string> = {
 // Module-level so the React compiler doesn't treat it as an impure call during render.
 const messageId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-function formatFact(f: CopilotFact): string {
-  switch (f.unit) {
-    case 'cents':
-      return formatMoney(Number(f.value), f.currency);
-    case 'pct':
-      return `${f.value}%`;
-    case 'days':
-      return `${f.value} days`;
-    case 'months':
-      return Number(f.value) === 1 ? '1 month' : `${f.value} months`;
-    default:
-      return String(f.value);
-  }
-}
 
 export function CopilotTab({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const {
@@ -359,7 +345,7 @@ export function CopilotTab({ onNavigate }: { onNavigate?: (tab: string) => void 
         </button>
       </form>
 
-      <AiConsentDialog isOpen={consentOpen} onClose={() => setConsentOpen(false)} onAccept={() => setPreferences({ isAiEnabled: true })} />
+      <AiConsentDialog isOpen={consentOpen} onClose={() => setConsentOpen(false)} />
 
       {/* AI Disclaimer */}
       <p className="text-[11px] text-center text-slate-500 font-medium">

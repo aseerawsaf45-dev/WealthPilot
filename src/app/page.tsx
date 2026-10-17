@@ -36,6 +36,31 @@ function WealthPilotApp() {
 
   const { accounts, addTransaction, preferences, isReady, syncError, clearSyncError } = useFinance();
 
+  // The app's own "Reduced motion" setting: globals.css disables animation under this attribute.
+  useEffect(() => {
+    document.documentElement.dataset.reducedMotion = String(!!preferences.reducedMotion);
+  }, [preferences.reducedMotion]);
+
+  // Error toasts dismiss themselves after 6 s (still dismissible by hand).
+  useEffect(() => {
+    if (!syncError) return;
+    const t = setTimeout(clearSyncError, 6000);
+    return () => clearTimeout(t);
+  }, [syncError, clearSyncError]);
+
+  // Card spotlight: one delegated listener sets --mx/--my on the hovered card (see .keel-card).
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const card = (e.target as Element | null)?.closest?.('.keel-card') as HTMLElement | null;
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', `${e.clientX - r.left}px`);
+      card.style.setProperty('--my', `${e.clientY - r.top}px`);
+    };
+    document.addEventListener('pointermove', onMove, { passive: true });
+    return () => document.removeEventListener('pointermove', onMove);
+  }, []);
+
   // Sync hash on mount and hash changes
   useEffect(() => {
     const syncFromHash = () => {
@@ -176,29 +201,45 @@ function WealthPilotApp() {
           </div>
         )}
         {syncError && (
-          <div role="alert" className="fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-rose-300 bg-white px-4 py-3 text-xs font-semibold text-rose-800 shadow-lg">
+          <div role="alert" className="wp-pop fixed bottom-24 sm:bottom-6 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-rose-300 bg-white px-4 py-3 text-xs font-semibold text-rose-800 shadow-lg">
             <span>{syncError}</span>
             <button onClick={clearSyncError} aria-label="Dismiss error" className="rounded-full p-1 text-rose-600 hover:bg-rose-50 cursor-pointer">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
-        {activeTab === 'overview' && (
-          <OverviewTab
-            setActiveTab={setActiveTab}
-            openAddTxModal={() => setIsQuickAddOpen(true)}
-          />
+        {!isReady ? (
+          // Skeleton while the first load runs, instead of flashing demo numbers for signed-in users.
+          <div aria-busy="true" aria-label="Loading your workspace" className="space-y-6">
+            <div className="wp-skeleton h-10 w-64" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="wp-skeleton h-36" />
+              <div className="wp-skeleton h-36" />
+              <div className="wp-skeleton h-36" />
+            </div>
+            <div className="wp-skeleton h-72" />
+          </div>
+        ) : (
+          // Keyed by tab so each tab switch replays the entrance animation.
+          <div key={activeTab} className="wp-enter">
+            {activeTab === 'overview' && (
+              <OverviewTab
+                setActiveTab={setActiveTab}
+                openAddTxModal={() => setIsQuickAddOpen(true)}
+              />
+            )}
+            {activeTab === 'transactions' && <TransactionsTab />}
+            {activeTab === 'accounts' && <AccountsTab />}
+            {activeTab === 'budgets' && <BudgetsTab />}
+            {activeTab === 'goals' && <GoalsTab />}
+            {activeTab === 'bills' && <BillsTab />}
+            {activeTab === 'planning' && <PlanningTab />}
+            {activeTab === 'learn' && <LearnTab />}
+            {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} />}
+            {activeTab === 'import' && <ImportTab />}
+            {activeTab === 'settings' && <SettingsTab />}
+          </div>
         )}
-        {activeTab === 'transactions' && <TransactionsTab />}
-        {activeTab === 'accounts' && <AccountsTab />}
-        {activeTab === 'budgets' && <BudgetsTab />}
-        {activeTab === 'goals' && <GoalsTab />}
-        {activeTab === 'bills' && <BillsTab />}
-        {activeTab === 'planning' && <PlanningTab />}
-        {activeTab === 'learn' && <LearnTab />}
-        {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} />}
-        {activeTab === 'import' && <ImportTab />}
-        {activeTab === 'settings' && <SettingsTab />}
       </main>
 
       {/* Clean Minimal Footer */}

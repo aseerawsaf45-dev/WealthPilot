@@ -11,7 +11,7 @@ import { toClientAudit, todayIn } from '../mappers';
 import { PreferencesPatch } from '../schemas';
 import { comparePassword } from '@/lib/auth/password';
 import type { UserPreferences } from '@/types/finance';
-import { CURRENT_AI_NOTICE, allowGemini } from '../ai/privacy';
+import { CURRENT_AI_NOTICE, allowGemini, canUseLlm } from '../ai/privacy';
 
 const profileSelect = {
   id: true,
@@ -21,6 +21,9 @@ const profileSelect = {
   timezone: true,
   region: true,
   isAiEnabled: true,
+  aiConsentAt: true,
+  aiConsentVersion: true,
+  aiProviders: true,
   uiPrefs: true,
   merchantRules: { select: { normalizedMerchant: true, category: true }, orderBy: { updatedAt: 'asc' } },
 } satisfies Prisma.UserSelect;
@@ -39,7 +42,9 @@ function toClientPreferences(user: ProfileRow): Partial<UserPreferences> & { reg
     baseCurrency: user.preferredCurrency,
     timezone: user.timezone,
     region: user.region,
-    isAiEnabled: user.isAiEnabled,
+    // Effective state: consent to an older notice no longer counts, so the UI shows AI off and asks again.
+    isAiEnabled: canUseLlm(user, 'groq') || canUseLlm(user, 'gemini'),
+    aiProviders: user.aiProviders,
     autoCategorizationRules: user.merchantRules.map((r) => ({ id: r.normalizedMerchant, keyword: r.normalizedMerchant, category: r.category })),
   };
 }

@@ -8,7 +8,7 @@
 import { scanAndRedactNpi } from '@/lib/compliance/glbaCompliance';
 import { scanAndEnforcePciDssScope } from '@/lib/compliance/pciDssCompliance';
 
-export const CURRENT_AI_NOTICE = 'ai-notice-v1';
+export const CURRENT_AI_NOTICE = 'ai-notice-v2'; // v2: adds the optional Gemini backup
 export type Provider = 'groq' | 'gemini';
 
 export interface AiConsentState {
@@ -23,6 +23,7 @@ export interface AiConsentState {
 const GEMINI_BLOCKED_REGIONS = new Set([
   'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL',
   'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO', 'GB', 'CH', 'CN',
+  'EU', // Settings offers "Other EU / EEA country" as EU
 ]);
 
 /** Gemini only with a declared region outside the blocked list (region = null → denied). */

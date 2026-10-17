@@ -58,6 +58,8 @@ body {
     0 10px 30px -4px rgba(15, 23, 42, 0.04),
     0 2px 8px -2px rgba(15, 23, 42, 0.02),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  /* Cursor spotlight: --mx/--my are set by one delegated pointer listener in page.tsx */
+  background-image: radial-gradient(420px circle at var(--mx, -999px) var(--my, -999px), rgba(14, 165, 233, 0.07), transparent 45%);
   transition: all 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -65,6 +67,7 @@ body {
   box-shadow:
     0 16px 36px -6px rgba(15, 23, 42, 0.07),
     0 4px 12px rgba(15, 23, 42, 0.03),
+    0 0 0 1px rgba(14, 165, 233, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 1);
   border-color: rgba(255, 255, 255, 1);
 }
@@ -302,6 +305,113 @@ body {
   .safe-area-bottom {
     padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
   }
+}
+
+/* =============================================================================
+   Motion system (ui-ux-pro-max "Standard" tier): enter 360ms, stagger 60ms,
+   hover 200–250ms, ease-out. Only transform/opacity are animated (no layout).
+   ============================================================================= */
+:root {
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-enter: 360ms;
+}
+
+@keyframes wp-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wp-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes wp-zoom-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wp-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wp-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes wp-pop {
+  0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes wp-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes wp-ping {
+  0% { transform: scale(1); opacity: 0.6; }
+  80%, 100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* Page/tab entrance and list stagger */
+.wp-enter { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) both; }
+.wp-stagger > * { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) both; }
+.wp-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.wp-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.wp-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.wp-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.wp-stagger > *:nth-child(6) { animation-delay: 300ms; }
+.wp-stagger > *:nth-child(7) { animation-delay: 360ms; }
+.wp-stagger > *:nth-child(8) { animation-delay: 420ms; }
+.wp-stagger > *:nth-child(9) { animation-delay: 480ms; }
+.wp-stagger > *:nth-child(n + 10) { animation-delay: 540ms; }
+.wp-pop { animation: wp-pop 280ms var(--ease-out-soft) both; }
+
+/* Classes the modals already used (tw-animate-css style) but that had no CSS behind them */
+.animate-in { animation: wp-fade-in 220ms var(--ease-out-soft) both; }
+.animate-in.zoom-in-95 { animation-name: wp-zoom-in; }
+.animate-in.slide-in-from-top-2,
+.animate-in.slide-in-from-top-4 { animation-name: wp-slide-down; }
+.animate-in.slide-in-from-bottom-2 { animation-name: wp-slide-up; }
+.animate-in.duration-150 { animation-duration: 150ms; }
+.animate-in.duration-200 { animation-duration: 200ms; }
+.animate-in.duration-300 { animation-duration: 300ms; }
+
+/* Loading skeleton */
+.wp-skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 37%, #e2e8f0 63%);
+  background-size: 400% 100%;
+  animation: wp-shimmer 1.4s ease infinite;
+  border-radius: 1.5rem;
+}
+
+/* Live status dot (saving / alerts) */
+.wp-ping { position: relative; isolation: isolate; }
+.wp-ping::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1; /* ring sits behind the badge text */
+  border-radius: 9999px;
+  background: inherit;
+  animation: wp-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Horizontally scrollable bars without a visible scrollbar (nav pills) */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Visible keyboard focus everywhere (never removed) */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid #0ea5e9;
+  outline-offset: 2px;
+}
+
+/* The app's own "Reduced motion" setting (Settings) mirrors the OS preference */
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] ::before,
+html[data-reduced-motion="true"] ::after {
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* Respect reduced motion */

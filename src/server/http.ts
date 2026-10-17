@@ -137,6 +137,15 @@ export function handle<C>(fn: Handler<C>): Handler<C> {
       // Log the error type only: messages can carry query values. Full detail in dev.
       const detail = process.env.NODE_ENV === 'development' ? error : (error as { code?: string; name?: string })?.code ?? (error as Error)?.name;
       console.error(`[api] ${request.method} ${new URL(request.url).pathname} failed:`, detail);
+      // Prisma timeouts (P2028/P2024/P1001) roll back, so nothing was saved. P1017 = Neon closed an idle
+      // connection (scale-to-zero); the next attempt reconnects.
+      const code = (error as { code?: string })?.code;
+      if (code === 'P2028' || code === 'P2024' || code === 'P1001') {
+        return fail('INTERNAL_ERROR', 'The database is slow to respond right now. Nothing was changed; please try again.', 503);
+      }
+      if (code === 'P1017') {
+        return fail('INTERNAL_ERROR', 'The database connection was reset (it was idle). Please try again.', 503);
+      }
       return fail('INTERNAL_ERROR', 'Something went wrong. Please try again.', 500);
     }
   };

@@ -194,7 +194,7 @@ export function OverviewTab({ setActiveTab, openAddTxModal }: OverviewTabProps) 
         </div>
 
         {/* 4 Key Bento Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        <div className="wp-stagger grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
           {/* Card 1: Total balance */}
           <div className="keel-card p-5 sm:p-6 flex flex-col justify-between hover:-translate-y-0.5 hover:shadow-lg transition-all duration-300">
             <div className="flex items-center justify-between mb-3">

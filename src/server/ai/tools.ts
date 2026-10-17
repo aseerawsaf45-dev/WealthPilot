@@ -27,7 +27,7 @@ export interface FinanceData {
     splits?: { category: string; amountCents: number }[];
   }[];
   budgets: { category: string; allocatedCents: number; alertThresholdPercent: number; monthYear: string }[];
-  goals: { name: string; targetCents: number; currentCents: number; targetDate: string | null; isPaused: boolean }[];
+  goals: { id?: string; name: string; targetCents: number; currentCents: number; targetDate: string | null; isPaused: boolean }[]; // id: server-side only, never sent to a model
   bills: { name: string; amountCents: number; nextDueDate: string; status: string }[];
   debts: { name: string; balanceCents: number; aprPercent: number; minimumPaymentCents: number }[];
 }
@@ -241,10 +241,12 @@ function upcomingBills(args: { days: number }, data: FinanceData): ToolOutput {
   };
 }
 
+/** Monthly contributions that fit before `target` (one per month on today's day-of-month). Minimum 1. */
 function monthsUntil(today: string, target: string): number {
-  const [ty, tm] = today.split('-').map(Number);
-  const [gy, gm] = target.split('-').map(Number);
-  return Math.max(1, (gy - ty) * 12 + (gm - tm));
+  const [ty, tm, td] = today.split('-').map(Number);
+  const [gy, gm, gd] = target.split('-').map(Number);
+  // Oct 17 → next Oct 1 is 11 contributions, not 12: the 12th would land after the deadline.
+  return Math.max(1, (gy - ty) * 12 + (gm - tm) - (gd < td ? 1 : 0));
 }
 
 function savingsPlan(args: { goalName?: string; monthlyCents?: number }, data: FinanceData): ToolOutput {
@@ -279,6 +281,191 @@ function savingsPlan(args: { goalName?: string; monthlyCents?: number }, data: F
     template: `${parts.join('. ')}.`,
     limitations: ['Monthly amounts are estimates that assume equal contributions and no interest.'],
     actions: [{ label: 'Open goals', action: 'open_goals' }],
+  };
+}
+
+// ---- Goal planner -------------------------------------------------------------
+
+export type PlanVerdict = 'reached' | 'on_track' | 'stretch' | 'not_reachable' | 'no_data';
+
+export interface GoalPlan extends ToolOutput {
+  verdict: PlanVerdict;
+  steps: string[]; // trusted text; facts referenced as {{#i}}
+  milestones: { label: string; factIndex: number }[];
+}
+
+// Spending that is usually fixed in the short term; never suggested as a cut.
+const FIXED_SPEND = /(housing|rent|mortgage|utilit|insurance|income|transfer|debt|loan|tax|medical|health)/i;
+
+/** YYYY-MM-DD `months` after `ymd`, clamped to the month's last day. */
+function addMonthsYmd(ymd: string, months: number): string {
+  const target = monthRange(shiftMonth(ymd.slice(0, 7), months));
+  const day = `${target.start.slice(0, 8)}${ymd.slice(8, 10)}`;
+  return day > target.end ? target.end : day;
+}
+
+/**
+ * Can the user reach a goal by a date, given their real income and spending? Averages the last
+ * 3 complete months (months with no transactions are skipped), subtracts what other dated goals
+ * need, then judges the monthly amount against the free surplus: ≤ 50% on track, ≤ 100% stretch.
+ */
+export function planGoal(args: { goalName: string; targetDate?: string }, data: FinanceData): GoalPlan {
+  const goal = data.goals.find((g) => g.name === args.goalName);
+  if (!goal) {
+    return { period: null, facts: [], template: 'I could not find that goal.', limitations: [], actions: [], verdict: 'no_data', steps: [], milestones: [] };
+  }
+  const facts: FactDraft[] = [];
+  const add = (f: FactDraft) => facts.push(f) - 1;
+  const remaining = Math.max(0, goal.targetCents - goal.currentCents);
+  const fSaved = add(money('Saved so far', goal.currentCents, data.currency));
+  const fTarget = add(money('Goal target', goal.targetCents, data.currency));
+  const fRemaining = add(money('Still needed', remaining, data.currency));
+  const limitations: string[] = ['Plans are estimates based on your recent averages; real months will vary.'];
+  const actions: ToolOutput['actions'] = [{ label: 'Open goals', action: 'open_goals' }];
+  const base = { period: null, limitations, actions };
+
+  if (remaining === 0) {
+    return { ...base, facts, template: `You have already reached ${goal.name}: {{#${fSaved}}} of {{#${fTarget}}}.`, verdict: 'reached', steps: [], milestones: [] };
+  }
+
+  // Ability to save: last 3 complete months that have any data.
+  const thisMonth = data.today.slice(0, 7);
+  const months = [1, 2, 3].map((n) => monthRange(shiftMonth(thisMonth, -n)));
+  let income = 0;
+  let spending = 0;
+  let monthsWithData = 0; // may be a fraction when falling back to this month so far
+  const catTotals = new Map<string, number>();
+  const tally = (p: Period) => {
+    const rows = data.transactions.filter((t) => t.currency === data.currency && !t.isTransfer && inPeriod(t.financialDate, p));
+    for (const t of rows) if (t.amountCents > 0) income += t.amountCents;
+    for (const [cat, v] of spendByCategory(rows, '')) {
+      spending += v;
+      catTotals.set(cat, (catTotals.get(cat) ?? 0) + v);
+    }
+    return rows.length > 0;
+  };
+  for (const p of months) if (tally(p)) monthsWithData += 1;
+
+  if (!monthsWithData) {
+    // New users have no complete month yet: scale this month so far (≥ 7 days) to a full month.
+    const day = Number(data.today.slice(8, 10));
+    const monthDays = Number(monthRange(thisMonth).end.slice(8, 10));
+    if (day >= 7 && tally({ start: `${thisMonth}-01`, end: data.today })) {
+      monthsWithData = day / monthDays;
+      limitations.push(`Rough estimate: based on the first ${day} days of this month, scaled to a full month.`);
+    } else {
+      return {
+        ...base,
+        facts,
+        template: `${goal.name}: {{#${fSaved}}} of {{#${fTarget}}} saved. I need at least a week of income and spending in WealthPilot to judge what you can afford; record your transactions and try again soon.`,
+        verdict: 'no_data',
+        steps: [],
+        milestones: [],
+      };
+    }
+  } else if (monthsWithData < 3) {
+    limitations.push(`Based on only ${monthsWithData} complete month(s) of history.`);
+  }
+  const avgIncome = Math.round(income / monthsWithData);
+  const avgSpending = Math.round(spending / monthsWithData);
+  const surplus = avgIncome - avgSpending;
+
+  // Other dated goals compete for the same surplus.
+  const otherNeeds = data.goals
+    .filter((g) => g !== goal && !g.isPaused && g.targetDate && g.targetDate > data.today && g.targetCents > g.currentCents)
+    .reduce((s, g) => s + Math.ceil((g.targetCents - g.currentCents) / monthsUntil(data.today, g.targetDate!)), 0);
+  const free = surplus - otherNeeds;
+
+  const fIncome = add(money('Average monthly income', avgIncome, data.currency));
+  const fSpending = add(money('Average monthly spending', avgSpending, data.currency));
+  const fSurplus = add(money('Average monthly amount left over', surplus, data.currency));
+  const fOther = otherNeeds ? add(money('Needed each month by your other goals', otherNeeds, data.currency, 'estimate')) : -1;
+
+  let deadline = args.targetDate ?? goal.targetDate ?? undefined;
+  if (deadline && deadline <= data.today) {
+    limitations.push('The deadline is not in the future, so this plan suggests a realistic date instead.');
+    deadline = undefined;
+  }
+
+  const comfortable = Math.floor(Math.max(0, free) / 2); // half the free surplus: room for surprises
+  const realisticMonths = comfortable > 0 ? Math.ceil(remaining / comfortable) : null;
+  const fRealisticDate = realisticMonths !== null ? add({ label: 'Realistic finish date', value: addMonthsYmd(data.today, realisticMonths), unit: 'date', kind: 'estimate' }) : -1;
+
+  let verdict: PlanVerdict;
+  let monthly: number;
+  let fMonthly: number;
+  let headline: string;
+  if (deadline) {
+    const monthsLeft = monthsUntil(data.today, deadline);
+    const required = Math.ceil(remaining / monthsLeft);
+    verdict = free <= 0 || required > free ? 'not_reachable' : required <= comfortable ? 'on_track' : 'stretch';
+    const fDeadline = add({ label: 'Your deadline', value: deadline, unit: 'date', kind: 'recorded' });
+    fMonthly = add(money('Needed each month to hit your deadline', required, data.currency, 'estimate'));
+    monthly = verdict === 'not_reachable' ? comfortable : required;
+    headline =
+      verdict === 'on_track'
+        ? `${goal.name} is on track: saving {{#${fMonthly}}} a month gets you there by {{#${fDeadline}}}, well within the {{#${fSurplus}}} you have left over each month.`
+        : verdict === 'stretch'
+          ? `${goal.name} by {{#${fDeadline}}} is a stretch: it needs {{#${fMonthly}}} a month, more than half of what you can spare.`
+          : `${goal.name} by {{#${fDeadline}}} is not reachable on your current budget: it needs {{#${fMonthly}}} a month, but you have about {{#${fSurplus}}} left over.`;
+  } else {
+    verdict = comfortable > 0 ? 'on_track' : 'not_reachable';
+    monthly = comfortable;
+    fMonthly = add(money('Suggested monthly saving', comfortable, data.currency, 'estimate'));
+    headline =
+      comfortable > 0
+        ? `${goal.name} has no deadline. Saving {{#${fMonthly}}} a month (half of what you have left over) would finish it by about {{#${fRealisticDate}}}.`
+        : `${goal.name}: your spending currently matches or exceeds your income, so there is nothing left over to save yet.`;
+  }
+  facts.push({ label: 'Plan verdict', value: verdict.replace('_', ' '), unit: 'text', kind: 'estimate' });
+
+  // Ways to close the gap: the 3 largest flexible categories, trimmed by 20%.
+  const steps: string[] = [];
+  if (monthly > 0) steps.push(`Move {{#${fMonthly}}} into ${goal.name} every month, ideally on payday so it happens before spending.`);
+  if (verdict === 'stretch' || verdict === 'not_reachable') {
+    const cuts = [...catTotals.entries()]
+      .filter(([cat]) => !FIXED_SPEND.test(cat))
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([cat, total]) => ({ cat, avg: Math.round(total / monthsWithData) }));
+    for (const c of cuts) {
+      const fSave = add(money(`Saving from trimming ${c.cat} by a fifth`, Math.round(c.avg / 5), data.currency, 'estimate'));
+      steps.push(`Trim ${c.cat} by a fifth to free about {{#${fSave}}} a month.`);
+    }
+    if (realisticMonths !== null && deadline) steps.push(`Or keep your current budget and move the deadline to {{#${fRealisticDate}}}.`);
+  }
+  if (fOther >= 0) steps.push(`Your other dated goals already need {{#${fOther}}} a month; pause or re-date one if this goal matters more.`);
+  steps.push('Review progress at each milestone below and adjust if your income or spending changes.');
+
+  // Milestones at 25/50/75/100% of the target, at the planned monthly amount.
+  const milestones: GoalPlan['milestones'] = [];
+  if (monthly > 0) {
+    // Fact labels go to the model, so no digits and no user-typed names (e.g. "Reserve (6 Mo)") in them:
+    // the model copies them and the grounding check rejects the wording.
+    // Ordinals only: number words ("three quarters", "half") are rejected by the grounding check too.
+    const steps4 = [
+      [25, 'first milestone'],
+      [50, 'second milestone'],
+      [75, 'third milestone'],
+      [100, 'final milestone (target reached)'],
+    ] as const;
+    for (const [share, words] of steps4) {
+      const amount = Math.round((goal.targetCents * share) / 100);
+      if (amount <= goal.currentCents) continue;
+      const date = addMonthsYmd(data.today, Math.ceil((amount - goal.currentCents) / monthly));
+      milestones.push({ label: `${share}% saved`, factIndex: add({ label: `${words[0].toUpperCase()}${words.slice(1)} date`, value: date, unit: 'date', kind: 'estimate' }) });
+    }
+  }
+
+  return {
+    ...base,
+    facts,
+    template:
+      `${headline} You have saved {{#${fSaved}}} of {{#${fTarget}}} ({{#${fRemaining}}} to go). ` +
+      `On average you earn {{#${fIncome}}} and spend {{#${fSpending}}} a month.`,
+    verdict,
+    steps,
+    milestones,
   };
 }
 
@@ -371,6 +558,13 @@ export const TOOLS: ToolDef[] = [
     args: z.object({ goalName: z.string().trim().min(1).max(80).optional(), monthlyCents: z.number().int().positive().safe().optional() }),
     llm: true,
     run: savingsPlan as ToolDef['run'],
+  },
+  {
+    name: 'plan_goal',
+    description: 'Judge whether a savings goal (by exact name) is reachable by a date given average income and spending, with a monthly plan, cuts and milestones.',
+    args: z.object({ goalName: z.string().trim().min(1).max(80), targetDate: ymd.optional() }),
+    llm: true,
+    run: planGoal as ToolDef['run'],
   },
   { name: 'get_debt_summary', description: 'Number of debts, total balance, total minimum payments and the highest-interest debt.', args: empty, llm: true, run: debtSummary as ToolDef['run'] },
   { name: 'find_possible_duplicates', description: 'Possible duplicate charges in the last 90 days.', args: empty, llm: false, run: possibleDuplicates as ToolDef['run'] },

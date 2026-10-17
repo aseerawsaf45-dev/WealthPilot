@@ -129,6 +129,10 @@ export interface UserPreferences {
   timezone: string;
   theme: 'dark' | 'light' | 'system';
   isAiEnabled: boolean;
+  /** Providers the user consented to (signed in); Gemini needs an allowed region. */
+  aiProviders?: string[];
+  /** ISO-3166 alpha-2 country, user-declared; null = most restrictive AI rules. */
+  region?: string | null;
   isDemoMode: boolean;
   dateFormat: string;
   reducedMotion: boolean;

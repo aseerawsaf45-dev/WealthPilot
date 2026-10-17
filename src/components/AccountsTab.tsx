@@ -167,7 +167,7 @@ export function AccountsTab() {
       )}
 
       {/* Accounts Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="wp-stagger grid grid-cols-1 md:grid-cols-2 gap-6">
         {filteredAccounts.map((acc) => {
           const Icon = getAccountIcon(acc.type);
           const isNegative = acc.balanceCents < 0;

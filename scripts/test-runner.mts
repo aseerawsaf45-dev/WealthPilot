@@ -522,6 +522,90 @@ describe('Server mappers, fingerprints & audit chain (pure)', () => {
   });
 });
 
+describe('AI goal planner (planGoal)', () => {
+  // Jul–Sep 2026: income 5,000.00, spending 3,000.00 (Housing 2,000 + Dining 1,000) → 2,000.00 left over a month.
+  const months = ['2026-07', '2026-08', '2026-09'];
+  const tx = (d: string, amountCents: number, category: string) => ({ financialDate: d, amountCents, category, currency: 'USD', isTransfer: false, merchant: 'm' });
+  const base = {
+    today: '2026-10-17',
+    currency: 'USD',
+    transactions: months.flatMap((m) => [tx(`${m}-01`, 500000, 'Income'), tx(`${m}-02`, -200000, 'Housing'), tx(`${m}-03`, -100000, 'Dining')]),
+    budgets: [],
+    bills: [],
+    debts: [],
+  };
+  const goal = (targetDate: string | null) => ({ name: 'House', targetCents: 1000000, currentCents: 100000, targetDate, isPaused: false });
+  const fact = (p: { facts: { label: string; value: unknown }[] }, label: string) => p.facts.find((f) => f.label === label)?.value;
+
+  it('is on track when the monthly need is at most half the surplus, with milestone dates', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const p = planGoal({ goalName: 'House' }, { ...base, goals: [goal('2027-10-17')] });
+    assert.strictEqual(p.verdict, 'on_track');
+    assert.strictEqual(fact(p, 'Average monthly amount left over'), 200000);
+    assert.strictEqual(fact(p, 'Needed each month to hit your deadline'), 75000); // 900,000 over 12 months
+    assert.strictEqual(fact(p, 'First milestone date'), '2026-12-17'); // (250,000 − 100,000) / 75,000 = 2 months
+  });
+
+  it('never schedules the final milestone after the deadline (deadline day earlier than today)', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const p = planGoal({ goalName: 'House' }, { ...base, goals: [goal('2027-10-01')] }); // Oct 17 → Oct 1: 11 contributions
+    assert.strictEqual(fact(p, 'Needed each month to hit your deadline'), 81819); // ceil(900,000 / 11)
+    const finalDate = fact(p, 'Final milestone (target reached) date') as string;
+    assert.ok(finalDate <= '2027-10-01', `final milestone ${finalDate} is after the deadline`);
+  });
+
+  it('falls back to this month so far, scaled to a full month, for new users', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const p = planGoal(
+      { goalName: 'House' },
+      { ...base, today: '2026-10-15', transactions: [tx('2026-10-01', 300000, 'Income'), tx('2026-10-02', -150000, 'Dining')], goals: [goal('2027-10-15')] }
+    );
+    assert.notStrictEqual(p.verdict, 'no_data');
+    assert.strictEqual(fact(p, 'Average monthly income'), 620000); // 300,000 over 15 of 31 days
+    assert.ok(p.limitations.some((l) => l.startsWith('Rough estimate')));
+    assert.ok(!p.facts.some((f) => f.label.includes('House')), 'user-typed goal names stay out of model-visible labels');
+  });
+
+  it('is a stretch between half and all of the surplus', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    assert.strictEqual(planGoal({ goalName: 'House' }, { ...base, goals: [goal('2027-04-17')] }).verdict, 'stretch'); // 150,000/month
+  });
+
+  it('is not reachable above the surplus: suggests a realistic date and cuts only flexible spending', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const p = planGoal({ goalName: 'House', targetDate: '2027-01-17' }, { ...base, goals: [goal(null)] });
+    assert.strictEqual(p.verdict, 'not_reachable'); // 300,000/month > 200,000
+    assert.strictEqual(fact(p, 'Realistic finish date'), '2027-07-17'); // 900,000 at 100,000/month
+    assert.ok(p.facts.some((f) => f.label === 'Saving from trimming Dining by a fifth' && f.value === 20000));
+    assert.ok(!p.facts.some((f) => f.label.includes('Housing by a fifth')), 'rent/housing is never suggested as a cut');
+  });
+
+  it("subtracts other dated goals' monthly needs from the surplus", async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    const other = { name: 'Car', targetCents: 720000, currentCents: 0, targetDate: '2027-10-17', isPaused: false }; // 60,000/month
+    const p = planGoal({ goalName: 'House' }, { ...base, goals: [goal('2027-10-17'), other] });
+    assert.strictEqual(fact(p, 'Needed each month by your other goals'), 60000);
+    assert.strictEqual(p.verdict, 'stretch'); // 75,000 > (200,000 − 60,000)/2 = 70,000
+  });
+
+  it('refuses to judge without a complete month of history, and handles reached goals', async () => {
+    const { planGoal } = await import('../src/server/ai/tools.ts');
+    assert.strictEqual(planGoal({ goalName: 'House' }, { ...base, transactions: [], goals: [goal('2027-10-17')] }).verdict, 'no_data');
+    const done = { ...goal(null), currentCents: 1000000 };
+    assert.strictEqual(planGoal({ goalName: 'House' }, { ...base, goals: [done] }).verdict, 'reached');
+  });
+});
+
+describe('Grounding check', () => {
+  it('allows list markers but still rejects real figures and number words', async () => {
+    const { hasStrayNumber } = await import('../src/server/ai/orchestrator.ts');
+    assert.strictEqual(hasStrayNumber('1) Save {{f1}} a month 2) Trim dining'), false);
+    assert.strictEqual(hasStrayNumber('1) Save $5 a month'), true);
+    assert.strictEqual(hasStrayNumber('Save {{f1}}, about two thousand dollars'), true);
+    assert.strictEqual(hasStrayNumber('Your second milestone is {{f9}}'), false);
+  });
+});
+
 describe('AI privacy gateway', () => {
   it('redacts card numbers, emails, phone numbers and SSNs before anything reaches a model', async () => {
     const { redactForLlm } = await import('../src/server/ai/privacy.ts');

@@ -55,7 +55,8 @@ const NUMBER_WORDS =
 
 /** True when model text states a number of its own (digits or number words) outside placeholders. */
 export function hasStrayNumber(text: string): boolean {
-  const bare = text.replace(PLACEHOLDER, '');
+  // List markers like "1) " are not figures (live test: Groq numbered its plan steps); "$5" etc. still fail.
+  const bare = text.replace(PLACEHOLDER, '').replace(/(^|\s)[1-9]\)\s/g, '$1');
   return /\d/.test(bare) || NUMBER_WORDS.test(bare);
 }
 
@@ -129,10 +130,12 @@ const NARRATOR_PROMPT = [
   'You see each fact\'s label but NOT its numeric value. Every listed fact HAS a value (amount, date, count or percentage)',
   'that the server inserts where you write its placeholder, e.g. {{f1}}; so use them, and never say information is missing when a fact covers it.',
   'Placeholders already include the currency symbol or % sign: do not add $, %, or currency codes around them.',
-  'Each sentence must say exactly what its fact label says, e.g. for the label "Housing share of spending": "Housing made up {{f3}} of your spending".',
+  'Each sentence must say exactly what its fact label says, in natural words; never paste a label verbatim.',
+  'E.g. for the label "Housing share of spending": "Housing made up {{f3}} of your spending".',
   'Never write a number yourself, neither as digits nor as words ("two thousand", "eighty percent", "twice").',
   'Never guess or characterise a value you cannot see (no "large", "most", "over budget") unless a fact\'s text value says so.',
   'Name the period only with the Period fact\'s placeholder. Mark estimates as estimates. At most four sentences.',
+  'For steps write "First", "Then", "Finally" instead of numbering them.',
   "If the facts don't answer the question, say what is missing. No investment, tax or legal advice. No guilt-tripping about spending.",
   `Reply with JSON only: {"answer": string, "insights": [{"title": string, "description": string}] (max 3), "suggested_actions": [{"label": string, "action": one of ${SUGGESTED_ACTIONS.join('|')}}] (max 3)}.`,
 ].join(' ');
@@ -205,7 +208,16 @@ export function clampModelDates(args: Record<string, unknown>, today: string): b
   return changed;
 }
 
-export async function answerQuestion(message: string, data: FinanceData, deps: AnswerDeps): Promise<CopilotAnswer & { tools: string[] }> {
+/**
+ * `opts.calls` skips routing (the server already knows the calculation, e.g. the goal planner);
+ * `opts.narrate` lets the model word those results when AI is allowed.
+ */
+export async function answerQuestion(
+  message: string,
+  data: FinanceData,
+  deps: AnswerDeps,
+  opts: { calls?: ToolCall[]; narrate?: boolean } = {}
+): Promise<CopilotAnswer & { tools: string[] }> {
   const limitations = [...(deps.limitations ?? [])];
   const finish = (n: LlmNarration, source: CopilotAnswer['source'], a?: ReturnType<typeof assemble>, tools: string[] = []) => ({
     ...n,
@@ -231,7 +243,7 @@ export async function answerQuestion(message: string, data: FinanceData, deps: A
     ...data.transactions.flatMap((t) => [t.category, ...(t.splits ?? []).map((s) => s.category)]),
     ...data.budgets.map((b) => b.category),
   ];
-  let calls = routeIntent(question, data.today, categories);
+  let calls = opts.calls ?? routeIntent(question, data.today, categories);
   const llmPicked = !calls;
   if (!calls) {
     if (!deps.llm) return plain(HELP_TEXT);
@@ -269,7 +281,7 @@ export async function answerQuestion(message: string, data: FinanceData, deps: A
   // wording, and skipping the call halves use of the small shared Groq quota (plan §7.6).
   // The model narrates only questions it routed itself. Rules-only tools are never narrated.
   // With no facts (e.g. an empty date range) the template's "no spending recorded between …" beats model wording.
-  const narratable = deps.llm && llmPicked && a.facts.length > 0 && used.every((n) => toolByName(n)?.llm);
+  const narratable = deps.llm && (llmPicked || opts.narrate) && a.facts.length > 0 && used.every((n) => toolByName(n)?.llm);
   if (!deps.llm || !narratable) return finish(template, 'rules', a, used);
 
   // The period becomes a fact so the model names it via a placeholder instead of guessing.
@@ -289,7 +301,12 @@ export async function answerQuestion(message: string, data: FinanceData, deps: A
       // The model may pick a period the user didn't name (live test: September for "where is my money going?").
       // If its wording doesn't state the period, the server does.
       const answer = periodFact && !parsed.answer.includes(`{{${periodFact.id}}}`) ? `For ${periodFact.value}: ${grounded.answer}` : grounded.answer;
-      return finish({ ...grounded, answer, suggested_actions: grounded.suggested_actions.length ? grounded.suggested_actions : a.actions }, 'llm:groq', a, used);
+      return finish(
+        { ...grounded, answer, suggested_actions: grounded.suggested_actions.length ? grounded.suggested_actions : a.actions },
+        reply.provider === 'gemini' ? 'llm:gemini' : 'llm:groq',
+        a,
+        used
+      );
     }
     limitations.push('The AI wording did not pass the accuracy check; showing calculated results.');
   } catch (e) {

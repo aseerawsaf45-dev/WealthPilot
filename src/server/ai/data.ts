@@ -24,7 +24,7 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
       take: 5000, // shortcut: newest 5,000 rows in the window; aggregate in SQL if users exceed this
     }),
     prisma.budgetCategory.findMany({ where: { userId, monthYear: today.slice(0, 7) }, select: { category: true, allocatedCents: true, alertThresholdPercent: true, monthYear: true } }),
-    prisma.savingsGoal.findMany({ where: { userId }, select: { name: true, targetCents: true, currentCents: true, targetDate: true, isPaused: true } }),
+    prisma.savingsGoal.findMany({ where: { userId }, select: { id: true, name: true, targetCents: true, currentCents: true, targetDate: true, isPaused: true } }),
     prisma.billSubscription.findMany({ where: { userId }, select: { name: true, amountCents: true, nextDueDate: true, status: true } }),
     prisma.debtAccount.findMany({ where: { userId }, select: { name: true, balanceCents: true, aprPercent: true, minimumPaymentCents: true } }),
   ]);

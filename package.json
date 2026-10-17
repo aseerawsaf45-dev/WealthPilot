@@ -21,7 +21,8 @@
     "test:integration": "tsx --env-file=.env --test scripts/integration.mts",
     "eval:ai": "tsx scripts/ai-evals.mts",
     "eval:ai:live": "tsx --env-file=.env scripts/ai-live-check.mts",
-    "prepare": "git config core.hooksPath .githooks || exit 0"
+    "prepare": "git config core.hooksPath .githooks || exit 0",
+    "eval:ai:plan:live": "tsx --env-file=.env scripts/ai-plan-live.mts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

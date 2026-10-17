@@ -94,7 +94,7 @@ export function BudgetsTab() {
       <BudgetPacingGaugeChart budgets={budgets} />
 
       {/* Budgets Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="wp-stagger grid grid-cols-1 md:grid-cols-2 gap-6">
         {budgets.map((b) => {
           const pace = calculateBudgetPace(b.spentCents, b.allocatedCents);
           const remainingCents = b.allocatedCents - b.spentCents;
