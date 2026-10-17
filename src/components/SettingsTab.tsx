@@ -34,6 +34,7 @@ export function SettingsTab() {
     setPreferences,
     resetToDemoData,
     clearAllUserData,
+    deleteAccount,
   } = useFinance();
 
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('');
@@ -83,14 +84,14 @@ export function SettingsTab() {
     setTimeout(() => setExportNotice(null), 4000);
   };
 
-  // Handle Delete All Data
-  const handleConfirmDelete = () => {
-    if (deleteConfirmationInput === 'DELETE ALL DATA') {
-      clearAllUserData();
+  // Handle Delete All Data & Account (GDPR Art. 17)
+  const handleConfirmDelete = async () => {
+    if (deleteConfirmationInput === 'DELETE ALL DATA' || deleteConfirmationInput === 'DELETE ACCOUNT') {
+      const res = await deleteAccount();
       setIsDeleteModalOpen(false);
       setDeleteConfirmationInput('');
-      setExportNotice('All user data and local financial records have been permanently purged.');
-      setTimeout(() => setExportNotice(null), 5000);
+      setExportNotice(res.message || 'Account and all financial records have been permanently eradicated (GDPR Article 17).');
+      setTimeout(() => setExportNotice(null), 6000);
     }
   };
 

@@ -394,3 +394,74 @@ describe('PostgreSQL Multi-Tenant Schema & Database Invariants', () => {
   });
 });
 
+describe('Authentication & NIST SP 800-63B Security', () => {
+  it('validates password minimum length and boundary conditions', async () => {
+    const { validatePasswordStrength } = await import('../src/lib/auth/password.ts');
+    assert.strictEqual(validatePasswordStrength('short').valid, false);
+    assert.strictEqual(validatePasswordStrength('1234567').valid, false);
+    assert.strictEqual(validatePasswordStrength('admin123').valid, true);
+    assert.strictEqual(validatePasswordStrength('EnclaveSecurePass2026!').valid, true);
+  });
+
+  it('hashes and compares passwords with salted bcrypt', async () => {
+    const { hashPassword, comparePassword } = await import('../src/lib/auth/password.ts');
+    const hash = await hashPassword('admin123');
+    assert.ok(hash.startsWith('$2'), 'Hash must be a bcrypt hash');
+    assert.notStrictEqual(hash, 'admin123', 'Hash must never equal plaintext');
+
+    const isMatch = await comparePassword('admin123', hash);
+    assert.strictEqual(isMatch, true, 'Original password must verify against its hash');
+
+    const wrongMatch = await comparePassword('wrongpassword', hash);
+    assert.strictEqual(wrongMatch, false, 'Incorrect password must be rejected');
+  });
+
+  it('signs and verifies tamper-evident HMAC session tokens', async () => {
+    const { createSessionToken, verifySessionToken } = await import('../src/lib/auth/session.ts');
+    const token = createSessionToken({
+      id: 'user_aseer',
+      email: 'aseer@wealthpilot.app',
+      name: 'Aseer',
+      preferredCurrency: 'USD',
+    });
+
+    assert.ok(typeof token === 'string' && token.split('.').length === 3);
+
+    const session = verifySessionToken(token);
+    assert.ok(session !== null);
+    assert.strictEqual(session?.userId, 'user_aseer');
+    assert.strictEqual(session?.email, 'aseer@wealthpilot.app');
+    assert.strictEqual(session?.name, 'Aseer');
+
+    // Tampering test: modify a byte in payload
+    const parts = token.split('.');
+    const tamperedToken = `${parts[0]}.${parts[1]}A.${parts[2]}`;
+    assert.strictEqual(verifySessionToken(tamperedToken), null, 'Tampered token must be rejected');
+  });
+});
+
+describe('Antigravity Agent Lifecycle Hooks & Invariant Guards', () => {
+  it('defines valid .agents/hooks.json specification', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const hooksPath = path.join(process.cwd(), '.agents', 'hooks.json');
+    assert.ok(fs.existsSync(hooksPath), '.agents/hooks.json must exist');
+
+    const raw = fs.readFileSync(hooksPath, 'utf8');
+    const hooks = JSON.parse(raw);
+    assert.ok(hooks['fintech-compliance-guard'], 'Hook fintech-compliance-guard must be defined');
+    assert.ok(Array.isArray(hooks['fintech-compliance-guard'].PreInvocation), 'PreInvocation must be array');
+    assert.ok(Array.isArray(hooks['fintech-compliance-guard'].PreToolUse), 'PreToolUse must be array');
+    assert.ok(Array.isArray(hooks['fintech-compliance-guard'].PostToolUse), 'PostToolUse must be array');
+  });
+
+  it('has executable agent hook guard scripts', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    assert.ok(fs.existsSync(path.join(process.cwd(), 'scripts', 'agent-pre-invocation.js')));
+    assert.ok(fs.existsSync(path.join(process.cwd(), 'scripts', 'agent-pre-tool-guard.js')));
+    assert.ok(fs.existsSync(path.join(process.cwd(), 'scripts', 'agent-post-tool-guard.js')));
+  });
+});
+
+

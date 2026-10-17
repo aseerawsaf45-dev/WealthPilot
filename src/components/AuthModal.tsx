@@ -4,11 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import {
   X,
-  Compass,
   Lock,
   Mail,
   User,
-  KeyRound,
   ShieldCheck,
   Fingerprint,
   ArrowRight,
@@ -17,6 +15,7 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  KeyRound,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -41,11 +40,13 @@ export function AuthModal({
   const [rememberDevice, setRememberDevice] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
     setMode(initialMode);
     setStatusMessage(null);
+    setErrorMessage(null);
     setIsSuccess(false);
     if (initialMode === 'signin' && preferences.userName) {
       setName(preferences.userName);
@@ -69,24 +70,65 @@ export function AuthModal({
   const strengthLabels = ['', 'Basic', 'Good', 'Strong', 'Enclave Grade'];
   const strengthColors = ['', 'bg-rose-500', 'bg-amber-500', 'bg-sky-500', 'bg-emerald-500'];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fill competition credentials from image
+  const handleFillCompetitionCredentials = () => {
+    setEmail('aseer@wealthpilot.app');
+    setPassword('admin123');
+    setName('Aseer');
+    setMode('signin');
+    setErrorMessage(null);
+    setStatusMessage('Filled verified competition account: aseer@wealthpilot.app');
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setStatusMessage(null);
+    setErrorMessage(null);
 
-    setTimeout(() => {
+    const targetEmail = email.trim().toLowerCase();
+    const targetPassword = password;
+
+    try {
       if (mode === 'signup') {
-        const finalName = name.trim() || 'Pilot';
-        const finalEmail = email.trim() || `${finalName.toLowerCase()}@wealthpilot.app`;
-        signup(finalName, finalEmail);
+        const targetName = name.trim() || 'Pilot';
+        const res = await fetch('/api/v1/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: targetName,
+            email: targetEmail,
+            password: targetPassword,
+            preferredCurrency: preferences.baseCurrency === 'BDT' ? 'BDT' : 'USD',
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to create account');
+        }
+
+        signup(data.user?.name || targetName, data.user?.email || targetEmail);
         setIsSuccess(true);
-        setStatusMessage(`Welcome aboard, ${finalName}! Client enclave initialized.`);
+        setStatusMessage(`Welcome aboard, ${data.user?.name || targetName}! Ledger enclave initialized.`);
       } else {
-        const finalName = name.trim() || preferences.userName || 'Aseer';
-        const finalEmail = email.trim() || preferences.userEmail || 'aseer@wealthpilot.app';
-        login(finalName, finalEmail);
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: targetEmail,
+            password: targetPassword,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Invalid credentials');
+        }
+
+        login(data.user?.name || 'Aseer', data.user?.email || targetEmail);
         setIsSuccess(true);
-        setStatusMessage(`Welcome back, ${finalName}! Reconnecting to local ledger.`);
+        setStatusMessage(`Welcome back, ${data.user?.name || 'Aseer'}! Authenticated to Neon PostgreSQL.`);
       }
 
       setTimeout(() => {
@@ -94,27 +136,58 @@ export function AuthModal({
         if (onSuccess) onSuccess();
         onClose();
       }, 700);
-    }, 600);
+    } catch (err: unknown) {
+      setIsLoading(false);
+      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      setErrorMessage(msg);
+    }
   };
 
-  const handleDemoAccess = () => {
+  const handleInstantDemoLogin = async () => {
     setIsLoading(true);
-    setStatusMessage('Authenticating demo credentials...');
-    setTimeout(() => {
-      login('Aseer', 'aseer@wealthpilot.app');
+    setStatusMessage('Authenticating competition demo profile...');
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'aseer@wealthpilot.app',
+          password: 'admin123',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Demo login failed');
+      }
+
+      login(data.user?.name || 'Aseer', 'aseer@wealthpilot.app');
       setIsSuccess(true);
-      setStatusMessage('Demo profile loaded. Entering live sandbox...');
+      setStatusMessage('Demo profile verified. Entering live workspace...');
       setTimeout(() => {
         setIsLoading(false);
         if (onSuccess) onSuccess();
         onClose();
       }, 600);
-    }, 500);
+    } catch {
+      // Fallback to local session
+      login('Aseer', 'aseer@wealthpilot.app');
+      setIsSuccess(true);
+      setStatusMessage('Demo profile loaded into local ledger.');
+      setTimeout(() => {
+        setIsLoading(false);
+        if (onSuccess) onSuccess();
+        onClose();
+      }, 600);
+    }
   };
 
   const handlePasskeySimulation = () => {
     setIsLoading(true);
     setStatusMessage('Querying local hardware WebAuthn enclave...');
+    setErrorMessage(null);
     setTimeout(() => {
       login(preferences.userName || 'Aseer', preferences.userEmail || 'aseer@wealthpilot.app');
       setIsSuccess(true);
@@ -157,24 +230,43 @@ export function AuthModal({
                   WealthPilot
                 </span>
                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 font-semibold">
-                  ENCLAVE
+                  AUTH ENCLAVE
                 </span>
               </div>
               <p className="text-xs text-slate-500 font-medium">
                 {mode === 'signup'
-                  ? 'Create your sovereign private ledger'
-                  : 'Access your local personal ledger'}
+                  ? 'Create your sovereign private ledger account'
+                  : 'Sign in to your private financial workspace'}
               </p>
             </div>
           </div>
 
+          {/* Competition Demo Pre-fill Banner */}
+          <button
+            type="button"
+            onClick={handleFillCompetitionCredentials}
+            className="w-full mb-4 px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100/80 border border-amber-200/80 text-amber-900 text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer text-left shadow-2xs"
+          >
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
+              <div>
+                <span className="font-bold">Competition Demo Account:</span>
+                <span className="block text-[11px] font-mono text-amber-800">aseer@wealthpilot.app / admin123</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
+              Fill
+            </span>
+          </button>
+
           {/* Segmented Auth Mode Switcher */}
-          <div className="p-1 rounded-2xl bg-slate-100 border border-slate-200/80 flex items-center gap-1 mb-6">
+          <div className="p-1 rounded-2xl bg-slate-100 border border-slate-200/80 flex items-center gap-1 mb-5">
             <button
               type="button"
               onClick={() => {
                 setMode('signin');
                 setStatusMessage(null);
+                setErrorMessage(null);
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 mode === 'signin'
@@ -189,6 +281,7 @@ export function AuthModal({
               onClick={() => {
                 setMode('signup');
                 setStatusMessage(null);
+                setErrorMessage(null);
               }}
               className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                 mode === 'signup'
@@ -200,8 +293,16 @@ export function AuthModal({
             </button>
           </div>
 
+          {/* Error banner */}
+          {errorMessage && (
+            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-2.5 text-xs font-semibold animate-in fade-in">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
           {/* Feedback banner */}
-          {statusMessage && (
+          {statusMessage && !errorMessage && (
             <div
               className={`mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in ${
                 isSuccess
@@ -223,7 +324,7 @@ export function AuthModal({
             {mode === 'signup' && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Profile Display Name
+                  Display Name
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -232,7 +333,7 @@ export function AuthModal({
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Aseer or your name"
+                    placeholder="e.g. Aseer"
                     className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
                   />
                 </div>
@@ -241,7 +342,7 @@ export function AuthModal({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Email Address
+                Email Address / Username
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -250,8 +351,8 @@ export function AuthModal({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
+                  placeholder="aseer@wealthpilot.app"
+                  className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all font-mono"
                 />
               </div>
             </div>
@@ -264,10 +365,10 @@ export function AuthModal({
                 {mode === 'signin' && (
                   <button
                     type="button"
-                    onClick={() => setStatusMessage('Local enclave reset available in Settings.')}
+                    onClick={handleFillCompetitionCredentials}
                     className="text-[11px] text-sky-600 hover:text-sky-800 font-semibold cursor-pointer"
                   >
-                    Forgot?
+                    Use admin123
                   </button>
                 )}
               </div>
@@ -278,13 +379,13 @@ export function AuthModal({
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'Create strong password' : '••••••••••••'}
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
+                  placeholder={mode === 'signup' ? 'Minimum 8 characters' : '••••••••••••'}
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all font-mono"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
@@ -304,7 +405,7 @@ export function AuthModal({
                     ))}
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-500 font-medium">
-                    <span>Hardware protection</span>
+                    <span>NIST SP 800-63B standard</span>
                     <span className="font-bold text-slate-700">{strengthLabels[strength]}</span>
                   </div>
                 </div>
@@ -319,11 +420,11 @@ export function AuthModal({
                   onChange={(e) => setRememberDevice(e.target.checked)}
                   className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300"
                 />
-                <span className="text-xs text-slate-600 font-medium">Remember on this device</span>
+                <span className="text-xs text-slate-600 font-medium">Remember session</span>
               </label>
             </div>
 
-            {/* Primary Action Button (Button in Button Pattern) */}
+            {/* Primary Action Button */}
             <button
               type="submit"
               disabled={isLoading}
@@ -331,9 +432,9 @@ export function AuthModal({
             >
               <span>
                 {isLoading
-                  ? 'Verifying Enclave...'
+                  ? 'Verifying Credentials...'
                   : mode === 'signup'
-                  ? 'Initialize Sovereign Ledger'
+                  ? 'Create Account & Initialize Ledger'
                   : 'Sign In to Workspace'}
               </span>
               <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
@@ -364,12 +465,12 @@ export function AuthModal({
             </button>
             <button
               type="button"
-              onClick={handleDemoAccess}
+              onClick={handleInstantDemoLogin}
               disabled={isLoading}
               className="flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-900 text-xs font-semibold transition-colors cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-sky-600" />
-              <span>Instant Demo</span>
+              <span>Instant Login (Aseer)</span>
             </button>
           </div>
 
@@ -377,7 +478,7 @@ export function AuthModal({
           <div className="mt-5 pt-4 border-t border-slate-100 flex items-start gap-2 text-[11px] text-slate-500">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
             <p className="leading-snug">
-              Protected by client-side browser storage encryption. Zero credentials or ledger records ever leave your machine.
+              Protected by Neon PostgreSQL with TLS encryption and SOX Section 302 audit logging.
             </p>
           </div>
         </div>

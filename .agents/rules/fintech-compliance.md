@@ -1,6 +1,6 @@
 # FinTech Compliance & Architecture Rules for WealthPilot
 
-These rules apply across all coding, refactoring, and AI tasks in WealthPilot.
+These rules apply across all coding, refactoring, and AI tasks in WealthPilot for the Shenzhen International FinTech Competition-2026.
 
 ## 1. Single Source of Truth & Memory Protocol
 - **MANDATORY:** Before writing or modifying any feature, check [PROJECT_MEMORY.md](file:///d:/%23%23%23Competetions/Shenzhen%20International%20FinTech%20Competition-2026/code/WealthPilot/PROJECT_MEMORY.md) to inspect what components are already completed and tested.
@@ -12,7 +12,7 @@ These rules apply across all coding, refactoring, and AI tasks in WealthPilot.
 - Convert to display currency only at the presentation boundary via `formatMoney(cents)`.
 
 ## 3. Multi-Tenant Authorization & BOLA Defense
-- All backend routes, server actions, and AI tools must bind strictly to the authenticated `session.user.id`.
+- All backend routes, server actions, and AI tools must bind strictly to the authenticated `session.userId`.
 - Never trust a `userId` supplied in the client request body or URL parameters.
 
 ## 4. AI Copilot Grounding & Anti-Hallucination
@@ -22,5 +22,14 @@ These rules apply across all coding, refactoring, and AI tasks in WealthPilot.
 - Always check `user.isAiEnabled` before firing external AI requests.
 
 ## 5. Security & Zero Secret Leaks
-- Never commit real API keys (`GEMINI_API_KEY`, `DATABASE_URL`, `NEXTAUTH_SECRET`).
+- Never commit real API keys (`GEMINI_API_KEY`, `DATABASE_URL`, `NEON_AUTH_COOKIE_SECRET`).
 - Run `npm run check:security` before submitting code changes.
+
+## 6. Authentication Enclave & GDPR Article 17 Erasure
+- Baseline competition account: `aseer@wealthpilot.app` (password: `admin123`).
+- Passwords must be salted and hashed via bcrypt (NIST SP 800-63B).
+- Account deletion (`DELETE /api/v1/auth/account`) must execute cascading eradication across all relational models (`FinancialAccount`, `Transaction`, `BudgetCategory`, `SavingsGoal`, `BillSubscription`, `DebtAccount`, `AuditEvent`, `CopilotMessage`).
+
+## 7. Agent Lifecycle Hooks (`.agents/hooks.json`)
+- Antigravity agent lifecycle hooks automatically enforce PreInvocation compliance reminders and PreToolUse safety gating against destructive commands.
+- Never disable or bypass `.agents/hooks.json`.

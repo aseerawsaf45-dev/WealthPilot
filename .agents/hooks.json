@@ -1,0 +1,35 @@
+{
+  "fintech-compliance-guard": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node scripts/agent-pre-invocation.js",
+        "timeout": 15
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/agent-pre-tool-guard.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/agent-post-tool-guard.js",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

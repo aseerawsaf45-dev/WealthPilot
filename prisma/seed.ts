@@ -2,12 +2,13 @@
  * WealthPilot — Database Seed Script
  * 
  * Populates PostgreSQL with standard competition demonstration data:
- * - Deterministic Demo User ('user_pilot')
+ * - Primary Auth User: 'aseer@wealthpilot.app' / 'admin123' ('user_aseer')
+ * - Secondary Demo User: 'pilot@wealthpilot.io' / 'admin123' ('user_pilot')
  * - Real-world financial accounts (Checking, HYSA, Index Fund, Credit Card)
  * - Multi-month categorized ledger transactions
  * - Budget envelopes with pacing metrics
  * - Savings milestones and debt payoff structures
- * - Immutable SOX Section 302 audit entry
+ * - Immutable SOX Section 302 audit entries
  */
 
 import { PrismaClient, AccountType, TransactionStatus, TransactionSource, BillFrequency } from '@prisma/client';
@@ -20,17 +21,42 @@ import {
   initialDebts,
 } from '../src/lib/seedData';
 import { createSoxAuditEntry } from '../src/lib/compliance/soxCompliance';
+import { hashPasswordSync } from '../src/lib/auth/password';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting WealthPilot database seed...');
 
-  // 1. Create or upsert Demo User
+  const passwordHash = hashPasswordSync('admin123');
+
+  // 1. Create or upsert Primary User: aseer@wealthpilot.app (admin123)
+  const aseerUserId = 'user_aseer';
+  const aseerUser = await prisma.user.upsert({
+    where: { email: 'aseer@wealthpilot.app' },
+    update: {
+      passwordHash,
+      preferredCurrency: 'USD',
+      isAiEnabled: true,
+    },
+    create: {
+      id: aseerUserId,
+      name: 'Aseer',
+      email: 'aseer@wealthpilot.app',
+      passwordHash,
+      preferredCurrency: 'USD',
+      timezone: 'America/New_York',
+      isAiEnabled: true,
+    },
+  });
+  console.log(`   ✓ Primary User provisioned: ${aseerUser.name} (${aseerUser.email})`);
+
+  // Also maintain user_pilot for backwards compatibility
   const demoUserId = 'user_pilot';
-  const user = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { id: demoUserId },
     update: {
+      passwordHash,
       preferredCurrency: 'USD',
       isAiEnabled: true,
     },
@@ -38,12 +64,14 @@ async function main() {
       id: demoUserId,
       name: 'Demo Wealth Pilot',
       email: 'pilot@wealthpilot.io',
+      passwordHash,
       preferredCurrency: 'USD',
       timezone: 'America/New_York',
       isAiEnabled: true,
     },
   });
-  console.log(`   ✓ User provisioned: ${user.name} (${user.id})`);
+
+  const targetUserId = aseerUser.id;
 
   // 2. Provision Financial Accounts
   for (const acc of initialAccounts) {
@@ -51,12 +79,13 @@ async function main() {
     await prisma.financialAccount.upsert({
       where: { id: acc.id },
       update: {
+        userId: targetUserId,
         balanceCents: BigInt(acc.balanceCents),
         lastSyncedAt: new Date(acc.lastSyncedAt),
       },
       create: {
         id: acc.id,
-        userId: demoUserId,
+        userId: targetUserId,
         name: acc.name,
         institution: acc.institution,
         type: accountType,
@@ -69,7 +98,7 @@ async function main() {
       },
     });
   }
-  console.log(`   ✓ Seeded ${initialAccounts.length} financial accounts`);
+  console.log(`   ✓ Seeded ${initialAccounts.length} financial accounts for ${aseerUser.email}`);
 
   // 3. Provision Transactions
   for (const tx of initialTransactions) {
@@ -79,12 +108,13 @@ async function main() {
     await prisma.transaction.upsert({
       where: { id: tx.id },
       update: {
+        userId: targetUserId,
         amountCents: BigInt(tx.amountCents),
         financialDate: tx.financialDate,
       },
       create: {
         id: tx.id,
-        userId: demoUserId,
+        userId: targetUserId,
         accountId: tx.accountId,
         financialDate: tx.financialDate,
         postedAt: new Date(tx.postedAt),
@@ -108,19 +138,16 @@ async function main() {
   const currentMonthYear = new Date().toISOString().substring(0, 7); // e.g. "2026-10"
   for (const bgt of initialBudgets) {
     await prisma.budgetCategory.upsert({
-      where: {
-        userId_category_monthYear: {
-          userId: demoUserId,
-          category: bgt.category,
-          monthYear: currentMonthYear,
-        },
-      },
+      where: { id: bgt.id },
       update: {
+        userId: targetUserId,
+        category: bgt.category,
         allocatedCents: BigInt(bgt.allocatedCents),
+        monthYear: currentMonthYear,
       },
       create: {
         id: bgt.id,
-        userId: demoUserId,
+        userId: targetUserId,
         category: bgt.category,
         allocatedCents: BigInt(bgt.allocatedCents),
         monthYear: currentMonthYear,
@@ -136,11 +163,12 @@ async function main() {
     await prisma.savingsGoal.upsert({
       where: { id: goal.id },
       update: {
+        userId: targetUserId,
         currentCents: BigInt(goal.currentCents),
       },
       create: {
         id: goal.id,
-        userId: demoUserId,
+        userId: targetUserId,
         name: goal.name,
         targetCents: BigInt(goal.targetCents),
         currentCents: BigInt(goal.currentCents),
@@ -158,11 +186,12 @@ async function main() {
     await prisma.billSubscription.upsert({
       where: { id: bill.id },
       update: {
+        userId: targetUserId,
         amountCents: BigInt(bill.amountCents),
       },
       create: {
         id: bill.id,
-        userId: demoUserId,
+        userId: targetUserId,
         name: bill.name,
         amountCents: BigInt(bill.amountCents),
         frequency: freq,
@@ -181,11 +210,12 @@ async function main() {
     await prisma.debtAccount.upsert({
       where: { id: debt.id },
       update: {
+        userId: targetUserId,
         balanceCents: BigInt(debt.balanceCents),
       },
       create: {
         id: debt.id,
-        userId: demoUserId,
+        userId: targetUserId,
         name: debt.name,
         balanceCents: BigInt(debt.balanceCents),
         aprPercent: debt.aprPercent,
@@ -200,16 +230,17 @@ async function main() {
   // 8. Create SOX 302 Compliant Initial Audit Entry
   const soxAudit = createSoxAuditEntry('SYSTEM_SEEDER', 'ACCOUNT', 'seed_batch_001', 'CREATE', {
     seededAt: new Date().toISOString(),
+    user: aseerUser.email,
     accountCount: initialAccounts.length,
     transactionCount: initialTransactions.length,
   });
 
   await prisma.auditEvent.create({
     data: {
-      userId: demoUserId,
+      userId: targetUserId,
       eventType: 'LEDGER_SEED_INITIALIZATION',
       actor: 'SYSTEM',
-      details: 'Initial FinTech demonstration database seeded with verified minor-unit balances.',
+      details: `Initial FinTech demonstration database seeded for ${aseerUser.email} with verified minor-unit balances.`,
       checksumAfter: soxAudit.checksumAfter,
     },
   });

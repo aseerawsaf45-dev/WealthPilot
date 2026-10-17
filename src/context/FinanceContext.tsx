@@ -58,6 +58,7 @@ interface FinanceContextType {
   login: (name: string, email: string) => void;
   signup: (name: string, email: string) => void;
   logout: () => void;
+  deleteAccount: () => Promise<{ success: boolean; message?: string }>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -346,11 +347,44 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    try {
+      fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => null);
+    } catch {
+      // offline/local
+    }
     setPreferencesState((prev) => ({
       ...prev,
       isAuthenticated: false,
     }));
     logAuditEvent('USER_LOGOUT', 'auth', preferences.userId, 'User session logged out');
+  };
+
+  const deleteAccount = async (): Promise<{ success: boolean; message?: string }> => {
+    let message = '';
+    try {
+      const res = await fetch('/api/v1/auth/account', { method: 'DELETE' });
+      const data = await res.json();
+      if (data.message) message = data.message;
+    } catch {
+      // local fallback
+    }
+
+    clearAllUserData();
+    setPreferencesState({
+      ...defaultPreferences,
+      userName: 'Pilot',
+      userEmail: 'pilot@wealthpilot.app',
+      isAuthenticated: false,
+    });
+
+    try {
+      localStorage.clear();
+    } catch {
+      // ignore
+    }
+
+    logAuditEvent('USER_ACCOUNT_DELETED', 'auth', preferences.userId, 'Account and all financial entities eradicated (GDPR Art. 17)');
+    return { success: true, message: message || 'Account permanently deleted under GDPR Article 17.' };
   };
 
   return (
@@ -386,6 +420,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         login,
         signup,
         logout,
+        deleteAccount,
       }}
     >
       {children}

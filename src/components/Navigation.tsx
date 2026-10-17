@@ -17,10 +17,13 @@ import {
   X,
   Bell,
   Plus,
-  User,
   Globe,
   ArrowRight,
   LogIn,
+  LogOut,
+  Trash2,
+  Shield,
+  CheckCircle,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -38,9 +41,11 @@ export function Navigation({
   onOpenLanding,
   onOpenAuth,
 }: NavigationProps) {
-  const { preferences } = useFinance();
+  const { preferences, logout, deleteAccount } = useFinance();
   const displayName = preferences?.userName?.trim() || 'User';
+  const displayEmail = preferences?.userEmail?.trim() || 'aseer@wealthpilot.app';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Optimized primary navigation items
   const navItems = [
@@ -166,22 +171,96 @@ export function Navigation({
               </button>
             )}
 
-            {/* User Profile Pill / Auth Button */}
-            <button
-              onClick={() => {
-                if (onOpenAuth) onOpenAuth('signin');
-                else handleSelectTab('settings');
-              }}
-              className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-slate-100/90 hover:bg-slate-200/90 border border-slate-200/80 cursor-pointer transition-all hover:scale-[1.02]"
-              title={`Logged in as ${displayName} • Click to switch profile / sign in`}
-            >
-              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-sky-500 to-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
-              <span className="text-xs font-semibold text-slate-700 hidden sm:inline-block max-w-[80px] truncate">
-                {displayName}
-              </span>
-            </button>
+            {/* User Profile Pill / Dropdown Trigger */}
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full bg-slate-100/90 hover:bg-slate-200/90 border border-slate-200/80 cursor-pointer transition-all hover:scale-[1.02]"
+                title={`Account: ${displayName} (${displayEmail})`}
+              >
+                <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-sky-500 to-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                  {displayName.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs font-semibold text-slate-700 hidden sm:inline-block max-w-[80px] truncate">
+                  {displayName}
+                </span>
+              </button>
+
+              {/* Profile Dropdown Menu */}
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-2 w-64 bg-white/95 backdrop-blur-2xl rounded-2xl border border-slate-200/90 shadow-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="p-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-500 to-blue-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                        {displayName.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-900 truncate">{displayName}</p>
+                        <p className="text-[11px] font-mono text-slate-500 truncate">{displayEmail}</p>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Neon PostgreSQL Enclave</span>
+                    </div>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        handleSelectTab('settings');
+                        setUserMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-black hover:bg-slate-50 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Settings className="w-4 h-4 text-slate-500" />
+                      <span>Security & Settings</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (onOpenAuth) onOpenAuth('signin');
+                        setUserMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-700 hover:text-black hover:bg-slate-50 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <LogIn className="w-4 h-4 text-sky-600" />
+                      <span>Switch / Sign In</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        logout();
+                        setUserMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 text-amber-600" />
+                      <span>Sign Out</span>
+                    </button>
+
+                    <div className="border-t border-slate-100 my-1" />
+
+                    <button
+                      onClick={async () => {
+                        const confirmed = window.confirm(
+                          'GDPR Article 17 Erasure:\n\nAre you sure you want to permanently delete your account and eradicate all financial accounts, transactions, and audit trails from Neon PostgreSQL? This cannot be undone.'
+                        );
+                        if (confirmed) {
+                          await deleteAccount();
+                          setUserMenuOpen(false);
+                          alert('Account and all associated records permanently eradicated under GDPR Article 17.');
+                        }
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-600" />
+                      <span>Delete Account (GDPR)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Mobile Menu Hamburger Toggle */}
             <button
