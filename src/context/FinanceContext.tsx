@@ -11,6 +11,7 @@ import {
   UserPreferences,
   AuditEvent,
   CopilotMessage,
+  GoalPlanSnapshot,
 } from '../types/finance';
 import {
   initialAccounts,
@@ -81,6 +82,8 @@ interface FinanceContextType {
   updateGoal: (id: string, updates: Partial<SavingsGoal>) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
   contributeToGoal: (id: string, amountCents: number) => Promise<boolean>;
+  /** Calculates and saves the AI plan on the goal; errors are returned for inline display. */
+  planGoal: (id: string, targetDate?: string) => Promise<{ plan?: GoalPlanSnapshot; error?: string }>;
   addBill: (bill: Omit<BillSubscription, 'id' | 'userId'>) => Promise<void>;
   updateBill: (id: string, updates: Partial<BillSubscription>) => Promise<boolean>;
   deleteBill: (id: string) => Promise<void>;
@@ -469,6 +472,21 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setGoals((prev) => prev.filter((g) => g.id !== id));
   };
 
+  const planGoal = async (id: string, targetDate?: string): Promise<{ plan?: GoalPlanSnapshot; error?: string }> => {
+    if (!isAuthed) return { error: 'Sign in to get a plan based on your real income and spending.' };
+    setPendingCount((n) => n + 1);
+    try {
+      const res = await api.post<{ plan: GoalPlanSnapshot; goal: SavingsGoal }>(`/goals/${encodeURIComponent(id)}/plan`, targetDate ? { targetDate } : {});
+      setGoals((prev) => prev.map((g) => (g.id === id ? res.goal : g)));
+      return { plan: res.plan };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) resetToSeed();
+      return { error: e instanceof Error ? e.message : 'Could not build a plan right now.' };
+    } finally {
+      setPendingCount((n) => n - 1);
+    }
+  };
+
   const contributeToGoal = async (id: string, amountCents: number): Promise<boolean> => {
     if (!isAuthed) {
       setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, currentCents: Math.max(0, g.currentCents + amountCents) } : g)));
@@ -719,6 +737,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         updateGoal,
         deleteGoal,
         contributeToGoal,
+        planGoal,
         addBill,
         updateBill,
         deleteBill,

@@ -596,6 +596,27 @@ describe('AI goal planner (planGoal)', () => {
   });
 });
 
+describe('Saved goal plan staleness', () => {
+  it('flags a saved plan when the goal or its age no longer matches', async () => {
+    const { planStaleReason } = await import('../src/lib/goalPlan.ts');
+    const plan = {
+      verdict: 'on_track' as const, answer: '', insights: [], facts: [], steps: [], milestones: [], limitations: [], source: 'rules' as const,
+      targetDate: '2027-06-30', basis: { targetCents: 100000, currentCents: 20000, targetDate: '2027-06-30' },
+    };
+    const goal = {
+      id: 'g', userId: 'u', name: 'Car', targetCents: 100000, currentCents: 20000, targetDate: '2027-06-30', priority: 'low' as const,
+      category: 'x', isPaused: false, createdAt: '2026-10-01T00:00:00Z', plan, planUpdatedAt: '2026-10-10T00:00:00Z',
+    };
+    const now = new Date('2026-10-17T00:00:00Z');
+    assert.strictEqual(planStaleReason(goal, now), null);
+    assert.strictEqual(planStaleReason({ ...goal, currentCents: 25000 }, now), 'Your savings changed');
+    assert.strictEqual(planStaleReason({ ...goal, targetCents: 90000 }, now), 'The goal target changed');
+    assert.strictEqual(planStaleReason({ ...goal, targetDate: undefined }, now), 'The deadline changed');
+    assert.strictEqual(planStaleReason(goal, new Date('2026-11-20T00:00:00Z')), 'Older than 30 days');
+    assert.strictEqual(planStaleReason({ ...goal, plan: undefined }, now), null);
+  });
+});
+
 describe('Grounding check', () => {
   it('allows list markers but still rejects real figures and number words', async () => {
     const { hasStrayNumber } = await import('../src/server/ai/orchestrator.ts');

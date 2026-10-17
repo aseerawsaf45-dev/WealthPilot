@@ -12,6 +12,7 @@ import {
   CalendarDays,
   TrendingDown,
   Upload,
+  ChevronDown,
   GraduationCap,
   Sparkles,
   Settings,
@@ -57,7 +58,8 @@ export function Navigation({
   const navRef = useRef<HTMLElement>(null);
   const menusRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState({ left: 0, width: 0, visible: false });
-  const [navOverflows, setNavOverflows] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
 
   // Alerts for the bell: overdue / due-soon bills and budgets over (or near) their limit.
   const alerts = [
@@ -96,15 +98,30 @@ export function Navigation({
     if (!nav) return;
     const measure = () => {
       const btn = nav.querySelector<HTMLElement>(`[data-tab="${activeTab}"]`);
-      setIndicator(btn ? { left: btn.offsetLeft, width: btn.offsetWidth, visible: true } : (prev) => ({ ...prev, visible: false }));
-      btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      setNavOverflows(nav.scrollWidth > nav.clientWidth + 1);
+      // Viewport rects, not offsetLeft: the More button sits inside a wrapper, so offsetLeft would be wrapper-relative.
+      const navLeft = nav.getBoundingClientRect().left;
+      const r = btn?.getBoundingClientRect();
+      setIndicator(r ? { left: r.left - navLeft, width: r.width, visible: true } : (prev) => ({ ...prev, visible: false }));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(nav);
     return () => ro.disconnect();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);
+    const onClick = (e: MouseEvent) => {
+      if (!moreRef.current?.contains(e.target as Node)) setMoreOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [moreOpen]);
 
   // Menus close on Escape and on clicks outside them.
   useEffect(() => {
@@ -143,9 +160,15 @@ export function Navigation({
     { id: 'import', label: 'Import', icon: Upload },
   ];
 
+  const MORE_IDS = ['planning', 'learn', 'import'];
+  const inlineItems = navItems.filter((i) => !MORE_IDS.includes(i.id));
+  const moreItems = navItems.filter((i) => MORE_IDS.includes(i.id));
+  const activeMore = moreItems.find((i) => i.id === activeTab);
+
   const handleSelectTab = (id: string) => {
     setActiveTab(id);
     setMobileMenuOpen(false);
+    setMoreOpen(false);
   };
 
   return (
@@ -157,8 +180,8 @@ export function Navigation({
         }`}
       >
         <div
-          className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 sm:gap-4 transition-[height] duration-300 ${
-            scrolled ? 'h-14' : 'h-16'
+          className={`max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 flex items-center justify-between gap-3 lg:gap-4 xl:gap-6 transition-[height] duration-300 ${
+            scrolled ? 'h-16' : 'h-[76px]'
           }`}
         >
           
@@ -178,7 +201,7 @@ export function Navigation({
               <span className="font-extrabold text-base tracking-tight text-[#0F172A]">
                 WealthPilot
               </span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-sky-100 text-sky-800 font-bold font-mono">
+              <span className="hidden xl:inline text-[10px] px-1.5 py-0.2 rounded-full bg-sky-100 text-sky-800 font-bold font-mono">
                 v1.0
               </span>
             </div>
@@ -188,17 +211,15 @@ export function Navigation({
           <nav
             ref={navRef}
             aria-label="Primary navigation"
-            className={`relative hidden md:flex min-w-0 flex-1 max-w-fit items-center p-1 rounded-full glass-segmented gap-0.5 overflow-x-auto scrollbar-none ${
-              navOverflows ? '[mask-image:linear-gradient(to_right,black_85%,transparent)]' : ''
-            }`}
+            className="relative hidden md:flex items-center p-1.5 rounded-full glass-segmented gap-1"
           >
             {/* One pill that slides to the active tab */}
             <span
               aria-hidden="true"
-              className="absolute top-1 bottom-1 left-0 rounded-full bg-[#0F172A] shadow-[0_4px_14px_-4px_rgba(15,23,42,0.45)] transition-[transform,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+              className="absolute top-1.5 bottom-1.5 left-0 rounded-full bg-[#0F172A] shadow-[0_4px_14px_-4px_rgba(15,23,42,0.45)] transition-[transform,width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
               style={{ transform: `translateX(${indicator.left}px)`, width: indicator.width, opacity: indicator.visible ? 1 : 0 }}
             />
-            {navItems.map((item) => {
+            {inlineItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
                 <button
@@ -206,7 +227,7 @@ export function Navigation({
                   data-tab={item.id}
                   aria-current={isActive ? 'page' : undefined}
                   onClick={() => handleSelectTab(item.id)}
-                  className={`relative z-10 px-3 py-1.5 text-xs font-bold rounded-full transition-colors duration-200 cursor-pointer flex-shrink-0 whitespace-nowrap flex items-center gap-1 ${
+                  className={`relative z-10 px-3 xl:px-4 py-2 text-[13px] font-bold rounded-full transition-colors duration-200 cursor-pointer flex-shrink-0 whitespace-nowrap flex items-center gap-1.5 ${
                     isActive ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
@@ -223,10 +244,53 @@ export function Navigation({
                 </button>
               );
             })}
+
+            {/* More: Debt Planner, Learn, Import. Shows the active tab's name when one of them is open. */}
+            <div ref={moreRef} className="relative">
+              <button
+                data-tab={activeMore ? activeMore.id : '__more'}
+                onClick={() => setMoreOpen(!moreOpen)}
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                aria-current={activeMore ? 'page' : undefined}
+                className={`relative z-10 px-3 xl:px-4 py-2 text-[13px] font-bold rounded-full transition-colors duration-200 cursor-pointer flex-shrink-0 whitespace-nowrap flex items-center gap-1.5 ${
+                  activeMore ? 'text-white' : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
+                }`}
+              >
+                <span>{activeMore ? activeMore.label : 'More'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${moreOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {moreOpen && (
+                <div
+                  role="menu"
+                  className="absolute left-1/2 -translate-x-1/2 top-full mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl border border-slate-200/90 shadow-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150"
+                >
+                  {moreItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        role="menuitem"
+                        onClick={() => handleSelectTab(item.id)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-[13px] font-semibold text-left transition-colors cursor-pointer ${
+                          isActive ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-50 hover:text-black'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4 text-sky-600" />
+                        <span>{item.label}</span>
+                        {item.badge && <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-800 font-mono font-bold">{item.badge}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
 
           {/* Right Action Controls: Quick Record + Settings + Profile + Mobile Toggle */}
-          <div ref={menusRef} className="flex items-center gap-2">
+          <div ref={menusRef} className="flex items-center gap-2 xl:gap-2.5 flex-shrink-0">
             {/* Save status: where the data lives and whether a save is in flight */}
             <span
               role="status"
@@ -341,7 +405,7 @@ export function Navigation({
             {onOpenLanding && (
               <button
                 onClick={onOpenLanding}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white/90 hover:bg-slate-100 text-slate-700 hover:text-black text-xs font-bold transition-all cursor-pointer border border-slate-200/80 shadow-2xs hover:scale-102 whitespace-nowrap"
+                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white/90 hover:bg-slate-100 text-slate-700 hover:text-black text-xs font-bold transition-all cursor-pointer border border-slate-200/80 shadow-2xs hover:scale-102 whitespace-nowrap"
                 title="View Public Marketing Landing Page"
                 aria-label="Landing page"
               >

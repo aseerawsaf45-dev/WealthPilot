@@ -193,6 +193,8 @@ model SavingsGoal {
   category            String
   priority            String    @default("medium") // low | medium | high
   isPaused            Boolean   @default(false)
+  plan                Json?     // latest AI goal plan snapshot (what the plan dialog renders); history not kept
+  planUpdatedAt       DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

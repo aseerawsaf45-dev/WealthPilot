@@ -4,7 +4,8 @@
  */
 
 import type { z } from 'zod';
-import type { BillFrequency } from '@prisma/client';
+import type { BillFrequency, Prisma } from '@prisma/client';
+import type { GoalPlanSnapshot } from '@/types/finance';
 import { prisma } from '../db';
 import { writeAudit } from '../audit';
 import { HttpError } from '../http';
@@ -340,4 +341,18 @@ export async function deleteDebt(userId: string, id: string) {
     await writeAudit(tx, userId, 'DEBT_DELETED', `debt=${id}`);
   });
   return { id };
+}
+
+/** Saves the latest AI plan on the goal (latest only). shortcut: no plan history; add a table if users want to compare plans. */
+export async function saveGoalPlan(userId: string, id: string, plan: GoalPlanSnapshot) {
+  const existing = await prisma.savingsGoal.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Goal');
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.savingsGoal.update({
+      where: { id },
+      data: { plan: plan as unknown as Prisma.InputJsonValue, planUpdatedAt: new Date() },
+    });
+    await writeAudit(tx, userId, 'GOAL_PLAN_SAVED', `goal=${id} verdict=${plan.verdict}`);
+    return toClientGoal(row);
+  });
 }

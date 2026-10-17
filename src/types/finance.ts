@@ -68,6 +68,9 @@ export interface SavingsGoal {
   category: string;
   isPaused: boolean;
   createdAt: string;
+  /** Latest saved AI plan (signed in only). */
+  plan?: GoalPlanSnapshot;
+  planUpdatedAt?: string;
 }
 
 export interface BillSubscription {
@@ -165,6 +168,22 @@ export interface CopilotMessage {
   source?: 'rules' | 'llm:groq';
   insights?: { title: string; description: string }[];
   suggestedActions?: { label: string; action: string }[];
+}
+
+/** Latest AI goal plan, saved on the goal (POST /goals/:id/plan). Numbers live only in `facts` and server text. */
+export interface GoalPlanSnapshot {
+  verdict: 'reached' | 'on_track' | 'stretch' | 'not_reachable' | 'no_data';
+  answer: string;
+  insights: { title: string; description: string }[];
+  facts: CopilotFact[];
+  steps: string[];
+  milestones: { label: string; date: string }[];
+  limitations: string[];
+  source: 'rules' | 'llm:groq' | 'llm:gemini';
+  /** Deadline the plan was calculated for (null = no deadline; a date was suggested). */
+  targetDate: string | null;
+  /** Goal values at calculation time, to tell when the plan is out of date. */
+  basis: { targetCents: number; currentCents: number; targetDate: string | null };
 }
 
 export interface CopilotFact {

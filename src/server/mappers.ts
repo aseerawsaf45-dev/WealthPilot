@@ -24,6 +24,7 @@ import type {
   DebtAccount,
   AuditEvent,
   AccountType,
+  GoalPlanSnapshot,
 } from '@/types/finance';
 
 /** BigInt minor units → JSON-safe number (throws rather than losing precision). */
@@ -135,6 +136,9 @@ export function toClientGoal(row: DbGoal): SavingsGoal {
     category: row.category,
     isPaused: row.isPaused,
     createdAt: row.createdAt.toISOString(),
+    // Written only by saveGoalPlan with the GoalPlanSnapshot shape.
+    plan: (row.plan as unknown as GoalPlanSnapshot | null) ?? undefined,
+    planUpdatedAt: row.planUpdatedAt?.toISOString(),
   };
 }
 

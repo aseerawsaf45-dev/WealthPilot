@@ -169,6 +169,21 @@ describe('full CRUD: edit, delete, pay, contribute (and cross-tenant 404s)', () 
     await planning.deleteGoal(userA, goal.id);
   });
 
+  it('saves the AI plan on the goal, returns it with the goal, and only for the owner', async () => {
+    const goal = await planning.createGoal(userA, { name: 'Laptop', targetCents: 200000, currentCents: 50000, category: 'Tech', priority: 'medium', isPaused: false });
+    const snapshot = {
+      verdict: 'stretch' as const, answer: 'x', insights: [], facts: [], steps: ['Save monthly'], milestones: [{ label: '50% saved', date: '2027-01-01' }],
+      limitations: [], source: 'rules' as const, targetDate: null, basis: { targetCents: 200000, currentCents: 50000, targetDate: null },
+    };
+    await expect404(planning.saveGoalPlan(userB, goal.id, snapshot));
+    const saved = await planning.saveGoalPlan(userA, goal.id, snapshot);
+    assert.strictEqual(saved.plan?.verdict, 'stretch');
+    assert.ok(saved.planUpdatedAt);
+    const listed = (await planning.listGoals(userA)).find((g) => g.id === goal.id);
+    assert.deepStrictEqual(listed?.plan?.steps, ['Save monthly'], 'bootstrap/listGoals returns the saved plan');
+    await planning.deleteGoal(userA, goal.id); // plan lives on the goal row, so it goes with it
+  });
+
   it('deletes budgets and debts only for their owner', async () => {
     const budget = await planning.upsertBudget(userA, '2026-10', { category: 'Fun', allocatedCents: 10000, rolloverEnabled: false, alertThresholdPercent: 85 });
     const debt = await planning.createDebt(userA, { name: 'Card', balanceCents: 1000, aprPercent: 20, minimumPaymentCents: 100, dueDateDay: 5, category: 'credit_card' });

@@ -14,6 +14,8 @@ import { loadCopilotContext } from '@/server/ai/data';
 import { resolveLlm } from '@/server/ai/gate';
 import { answerQuestion, fillPlaceholders } from '@/server/ai/orchestrator';
 import { planGoal } from '@/server/ai/tools';
+import { saveGoalPlan } from '@/server/repos/planning';
+import type { GoalPlanSnapshot } from '@/types/finance';
 
 export const maxDuration = 30;
 
@@ -41,10 +43,18 @@ export const POST = authed<IdContext>(async (request, { userId }, ctx) => {
   const factMap = new Map(answer.facts.map((f) => [f.id, f]));
   const fill = (text: string) => fillPlaceholders(text.replace(/\{\{#(\d+)\}\}/g, (_, i: string) => `{{f${Number(i) + 1}}}`), factMap, false) ?? text;
 
-  return ok({
-    ...answer,
+  const snapshot: GoalPlanSnapshot = {
     verdict: plan.verdict,
+    answer: answer.answer,
+    insights: answer.insights,
+    facts: answer.facts,
     steps: plan.steps.map(fill),
     milestones: plan.milestones.map((m) => ({ label: m.label, date: String(plan.facts[m.factIndex].value) })),
-  });
+    limitations: answer.limitations,
+    source: answer.source,
+    targetDate: targetDate ?? goal.targetDate ?? null,
+    basis: { targetCents: goal.targetCents, currentCents: goal.currentCents, targetDate: goal.targetDate ?? null },
+  };
+  // Saved on the goal so the card shows it and reopening needs no recalculation (or AI quota).
+  return ok({ plan: snapshot, goal: await saveGoalPlan(userId, id, snapshot) });
 });

@@ -350,8 +350,8 @@ body {
 }
 
 /* Page/tab entrance and list stagger */
-.wp-enter { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) both; }
-.wp-stagger > * { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) both; }
+.wp-enter { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) backwards; } /* not "both": a lingering transform would make this the containing block of fixed modals */
+.wp-stagger > * { animation: wp-fade-up var(--dur-enter) var(--ease-out-soft) backwards; }
 .wp-stagger > *:nth-child(2) { animation-delay: 60ms; }
 .wp-stagger > *:nth-child(3) { animation-delay: 120ms; }
 .wp-stagger > *:nth-child(4) { animation-delay: 180ms; }

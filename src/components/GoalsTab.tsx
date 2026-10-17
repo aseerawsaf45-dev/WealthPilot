@@ -6,7 +6,8 @@ import { SavingsGoal } from '../types/finance';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { GoalTrajectoryChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
-import { GoalPlanDialog } from './GoalPlanDialog';
+import { GoalPlanDialog, VERDICT_STYLE, planHeadline } from './GoalPlanDialog';
+import { planStaleReason, daysAgo } from '../lib/goalPlan';
 import {
   Target,
   Plus,
@@ -23,7 +24,7 @@ export function GoalsTab() {
   const { goals, addGoal, updateGoal, deleteGoal, contributeToGoal } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [planGoal, setPlanGoal] = useState<SavingsGoal | null>(null);
+  const [planGoalId, setPlanGoalId] = useState<string | null>(null);
 
   // Add Goal Form State
   const [name, setName] = useState('');
@@ -205,19 +206,44 @@ export function GoalsTab() {
                   )}
                 </button>
               </div>
-              <button
-                onClick={() => setPlanGoal(g)}
-                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                AI plan: can I reach this in time?
-              </button>
+              {g.plan ? (
+                // Saved AI plan summary: click to reopen without recalculating.
+                <button
+                  onClick={() => setPlanGoalId(g.id)}
+                  aria-label={`View AI plan for ${g.name}`}
+                  className="w-full text-left p-3 rounded-xl bg-gradient-to-br from-sky-50 to-white hover:from-sky-100 border border-sky-200 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${VERDICT_STYLE[g.plan.verdict].pill}`}>
+                      <Sparkles className="w-3 h-3" />
+                      {VERDICT_STYLE[g.plan.verdict].label}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      {planStaleReason(g) ? (
+                        <span className="text-amber-700 font-bold">Out of date</span>
+                      ) : (
+                        g.planUpdatedAt && `Saved ${daysAgo(g.planUpdatedAt)}`
+                      )}
+                    </span>
+                  </span>
+                  <span className="block mt-1.5 text-xs font-bold text-slate-900">{planHeadline(g.plan)}</span>
+                  <span className="block mt-0.5 text-[11px] font-semibold text-sky-700">View plan →</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setPlanGoalId(g.id)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Plan with AI: can I reach this in time?
+                </button>
+              )}
             </div>
           );
         })}
       </div>
 
-      {planGoal && <GoalPlanDialog goal={planGoal} onClose={() => setPlanGoal(null)} />}
+      {planGoalId && <GoalPlanDialog goalId={planGoalId} onClose={() => setPlanGoalId(null)} />}
 
       {/* Add Goal Modal */}
       {isAddOpen && (
