@@ -13,6 +13,7 @@ import { prisma } from '../src/server/db.ts';
 import { HttpError, requireSession, startSession } from '../src/server/http.ts';
 import { rateLimit } from '../src/server/rateLimit.ts';
 import { chainHash } from '../src/server/audit.ts';
+import { scanAndEnforcePciDssScope } from '../src/lib/compliance/pciDssCompliance.ts';
 import * as ledger from '../src/server/repos/ledger.ts';
 import * as planning from '../src/server/repos/planning.ts';
 
@@ -112,6 +113,73 @@ describe('import: dedupe, rollback, re-import', () => {
   });
 });
 
+describe('full CRUD: edit, delete, pay, contribute (and cross-tenant 404s)', () => {
+  it('sets an account balance via the derived opening balance, and guards delete with 409', async () => {
+    const acc = await ledger.createAccount(userA, {
+      name: 'Wallet', institution: 'Test', type: 'cash', currency: 'USD', balanceCents: 1000, accountNumberMask: '•••• 0001', isIncludedInNetWorth: true,
+    });
+    await ledger.createTransaction(userA, { accountId: acc.id, financialDate: '2026-10-11', merchant: 'Snack', category: 'Dining', amountCents: -300, status: 'cleared', tags: [], isTransfer: false });
+    const edited = await ledger.patchAccount(userA, acc.id, { name: 'Pocket', balanceCents: 5000 });
+    assert.strictEqual(edited?.balanceCents, 5000, 'current balance equals what the user typed');
+    assert.strictEqual(edited?.name, 'Pocket');
+
+    await expect404(ledger.patchAccount(userB, acc.id, { name: 'x' }));
+    await expect404(ledger.deleteAccount(userB, acc.id, true));
+    await assert.rejects(ledger.deleteAccount(userA, acc.id, false), (e: unknown) => e instanceof HttpError && e.status === 409);
+    assert.deepStrictEqual(await ledger.deleteAccount(userA, acc.id, true), { id: acc.id, deletedTransactions: 1 });
+  });
+
+  it('moves a transaction between accounts and updates both balances', async () => {
+    const [a1, a2] = await Promise.all(
+      ['One', 'Two'].map((n, i) =>
+        ledger.createAccount(userA, { name: n, institution: 'T', type: 'checking', currency: 'USD', balanceCents: 0, accountNumberMask: `•••• 100${i}`, isIncludedInNetWorth: true })
+      )
+    );
+    const { transaction } = await ledger.createTransaction(userA, { accountId: a1.id, financialDate: '2026-10-12', merchant: 'Shop', category: 'General', amountCents: -700, status: 'cleared', tags: [], isTransfer: false });
+    const moved = await ledger.updateTransaction(userA, transaction.id, { accountId: a2.id });
+    assert.strictEqual(moved.account?.balanceCents, -700);
+    assert.strictEqual(moved.previousAccount?.balanceCents, 0);
+  });
+
+  it('pays a bill once per due date, records the expense and advances the date', async () => {
+    const acc = (await ledger.listAccounts(userA))[0];
+    const bill = await planning.createBill(userA, {
+      name: 'Internet', amountCents: 8000, frequency: 'monthly', nextDueDate: '2026-01-31', category: 'Utilities', accountId: acc.id, isAutoPay: false, status: 'active',
+    }, '2026-10-17');
+    const paid = await planning.payBill(userA, bill.id, { dueDate: '2026-01-31', recordTransaction: true }, '2026-10-17');
+    assert.strictEqual(paid.bill.nextDueDate, '2026-02-28', 'month-end clamps to February');
+    assert.strictEqual(paid.transaction?.amountCents, -8000);
+    await assert.rejects(planning.payBill(userA, bill.id, { dueDate: '2026-01-31', recordTransaction: true }, '2026-10-17'), (e: unknown) => e instanceof HttpError && e.status === 409);
+    await expect404(planning.payBill(userB, bill.id, { dueDate: '2026-02-28', recordTransaction: true }, '2026-10-17'));
+    await expect404(planning.patchBill(userB, bill.id, { name: 'x' }, '2026-10-17'));
+    const edited = await planning.patchBill(userA, bill.id, { amountCents: 9000, accountId: '' }, '2026-10-17');
+    assert.strictEqual(edited.amountCents, 9000);
+    assert.strictEqual(edited.accountId, '', 'payment account can be cleared');
+    await expect404(planning.deleteBill(userB, bill.id));
+    await planning.deleteBill(userA, bill.id);
+  });
+
+  it('adds to and withdraws from a goal, never below zero', async () => {
+    const goal = await planning.createGoal(userA, { name: 'Bike', targetCents: 50000, currentCents: 1000, category: 'Fun', priority: 'low', isPaused: false });
+    assert.strictEqual((await planning.contributeToGoal(userA, goal.id, 2500)).currentCents, 3500);
+    assert.strictEqual((await planning.contributeToGoal(userA, goal.id, -500)).currentCents, 3000);
+    await assert.rejects(planning.contributeToGoal(userA, goal.id, -999999), (e: unknown) => e instanceof HttpError && e.status === 400);
+    await expect404(planning.contributeToGoal(userB, goal.id, 100));
+    await expect404(planning.deleteGoal(userB, goal.id));
+    await planning.deleteGoal(userA, goal.id);
+  });
+
+  it('deletes budgets and debts only for their owner', async () => {
+    const budget = await planning.upsertBudget(userA, '2026-10', { category: 'Fun', allocatedCents: 10000, rolloverEnabled: false, alertThresholdPercent: 85 });
+    const debt = await planning.createDebt(userA, { name: 'Card', balanceCents: 1000, aprPercent: 20, minimumPaymentCents: 100, dueDateDay: 5, category: 'credit_card' });
+    await expect404(planning.deleteBudget(userB, budget.id));
+    await expect404(planning.deleteDebt(userB, debt.id));
+    await planning.deleteBudget(userA, budget.id);
+    await planning.deleteDebt(userA, debt.id);
+    assert.strictEqual((await planning.listDebts(userA)).length, 0);
+  });
+});
+
 describe('platform: rate limit, audit chain, session revocation', () => {
   it('allows 5 hits then returns 429 with Retry-After', async () => {
     const id = crypto.randomUUID();
@@ -128,7 +196,8 @@ describe('platform: rate limit, audit chain, session revocation', () => {
     for (const r of rows) {
       assert.strictEqual(r.checksumBefore, prev);
       assert.strictEqual(r.checksumAfter, chainHash(prev, { userId: userA, eventType: r.eventType, actor: r.actor, details: r.details, createdAt: r.createdAt }));
-      assert.ok(!/@|\d{4}\s?\d{4}/.test(r.details), 'no emails or card-like numbers in audit details');
+      assert.ok(!r.details.includes('@'), 'no emails in audit details');
+      assert.ok(scanAndEnforcePciDssScope(r.details).isCompliant, 'no card numbers in audit details');
       prev = r.checksumAfter;
     }
   });

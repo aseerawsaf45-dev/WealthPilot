@@ -7,10 +7,10 @@ import { HttpError } from './http';
 import { pepperHash } from './audit';
 
 /**
- * Counts one hit on `key` and throws a 429 HttpError once `limit` is exceeded within `windowSec`.
+ * Counts one hit and reports whether it is still within `limit` for `windowSec`.
  * Pass raw identifiers (email, IP) in `parts`; they are stored only as a keyed hash.
  */
-export async function rateLimit(scope: string, parts: string[], limit: number, windowSec: number): Promise<void> {
+export async function rateLimitHit(scope: string, parts: string[], limit: number, windowSec: number): Promise<{ allowed: boolean; retryAfter: number }> {
   const key = `${scope}:${pepperHash(parts.join('|'))}`;
   const rows = await prisma.$queryRaw<{ count: number; resetAt: Date }[]>`
     INSERT INTO "rate_limit_buckets" ("key", "count", "resetAt")
@@ -23,11 +23,14 @@ export async function rateLimit(scope: string, parts: string[], limit: number, w
     RETURNING "count", "resetAt"`;
 
   const { count, resetAt } = rows[0];
-  if (count > limit) {
-    // resetAt is a UTC wall-clock TIMESTAMP; Prisma reads it back as a UTC Date.
-    const retryAfter = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
-    throw new HttpError('RATE_LIMITED', 'Too many attempts. Please wait and try again.', 429, {
-      'Retry-After': String(retryAfter),
-    });
+  // resetAt is a UTC wall-clock TIMESTAMP; Prisma reads it back as a UTC Date.
+  return { allowed: count <= limit, retryAfter: Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000)) };
+}
+
+/** Same as rateLimitHit, but throws a 429 HttpError once the limit is exceeded. */
+export async function rateLimit(scope: string, parts: string[], limit: number, windowSec: number): Promise<void> {
+  const { allowed, retryAfter } = await rateLimitHit(scope, parts, limit, windowSec);
+  if (!allowed) {
+    throw new HttpError('RATE_LIMITED', 'Too many attempts. Please wait and try again.', 429, { 'Retry-After': String(retryAfter) });
   }
 }

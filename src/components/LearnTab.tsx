@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useFinance } from '../context/FinanceContext';
 import {
   GraduationCap,
   Flame,
@@ -243,6 +244,8 @@ const STORAGE_KEY_LEARN_COMPLETED = 'wealthpilot_learn_completed_v1';
 const STORAGE_KEY_LEARN_LAST_ACTIVE = 'wealthpilot_learn_last_active_v1';
 
 export function LearnTab() {
+  const { preferences, setPreferences } = useFinance();
+  const isSignedIn = preferences.isAuthenticated === true;
   const [xp, setXp] = useState(320);
   const [streak, setStreak] = useState(4);
   const [completedModules, setCompletedModules] = useState<string[]>(['mod_runway']);
@@ -261,8 +264,15 @@ export function LearnTab() {
   const [calcBurn, setCalcBurn] = useState(2500); // for emergency runway calculator
   const [calcApr, setCalcApr] = useState(8); // for rule of 72 calculator
 
-  // Load state from localStorage on client mount
+  // Signed in: progress comes from the account (preferences.learn); a new account starts at zero.
+  // Signed out (demo): progress stays in this browser's localStorage.
   useEffect(() => {
+    if (isSignedIn) {
+      setXp(preferences.learn?.xp ?? 0);
+      setStreak(preferences.learn?.streak ?? 0);
+      setCompletedModules(preferences.learn?.completed ?? []);
+      return;
+    }
     try {
       const savedXp = localStorage.getItem(STORAGE_KEY_LEARN_XP);
       const savedStreak = localStorage.getItem(STORAGE_KEY_LEARN_STREAK);
@@ -274,16 +284,25 @@ export function LearnTab() {
     } catch (e) {
       console.warn('Learn storage fallback', e);
     }
-  }, []);
+  }, [isSignedIn, preferences.learn]);
+
+  const persist = (next: { xp: number; streak: number; completed: string[] }) => {
+    if (isSignedIn) {
+      setPreferences({ learn: next }); // debounced PATCH /user/preferences
+      return;
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY_LEARN_XP, next.xp.toString());
+      localStorage.setItem(STORAGE_KEY_LEARN_COMPLETED, JSON.stringify(next.completed));
+    } catch {}
+  };
 
   // Save state
-  const addXp = (amount: number, reason: string) => {
+  const addXp = (amount: number, reason: string, completed: string[] = completedModules) => {
     const newXp = xp + amount;
     setXp(newXp);
     setXpToast({ amount, message: reason });
-    try {
-      localStorage.setItem(STORAGE_KEY_LEARN_XP, newXp.toString());
-    } catch {}
+    persist({ xp: newXp, streak, completed });
 
     setTimeout(() => {
       setXpToast(null);
@@ -294,10 +313,7 @@ export function LearnTab() {
     if (!completedModules.includes(moduleId)) {
       const updated = [...completedModules, moduleId];
       setCompletedModules(updated);
-      addXp(xpReward, 'Module Mastered!');
-      try {
-        localStorage.setItem(STORAGE_KEY_LEARN_COMPLETED, JSON.stringify(updated));
-      } catch {}
+      addXp(xpReward, 'Module Mastered!', updated);
     }
   };
 

@@ -5,6 +5,7 @@ import { useFinance } from '../context/FinanceContext';
 import { SavingsGoal } from '../types/finance';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { GoalTrajectoryChart } from './InteractiveCharts';
+import { RowActions } from './RowActions';
 import {
   Target,
   Plus,
@@ -13,12 +14,14 @@ import {
   TrendingUp,
   PauseCircle,
   PlayCircle,
+  PiggyBank,
   X,
 } from 'lucide-react';
 
 export function GoalsTab() {
-  const { goals, addGoal, updateGoal } = useFinance();
+  const { goals, addGoal, updateGoal, deleteGoal, contributeToGoal } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Add Goal Form State
   const [name, setName] = useState('');
@@ -28,9 +31,51 @@ export function GoalsTab() {
   const [category, setCategory] = useState('Safety Net');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('high');
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setName('');
+    setTarget('');
+    setCurrent('');
+    setDeadline('');
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (g: SavingsGoal) => {
+    setEditingId(g.id);
+    setName(g.name);
+    setTarget((g.targetCents / 100).toString());
+    setCurrent((g.currentCents / 100).toString());
+    setDeadline(g.targetDate ?? '');
+    setCategory(g.category);
+    setPriority(g.priority);
+    setIsAddOpen(true);
+  };
+
+  const handleAddMoney = async (g: SavingsGoal) => {
+    const input = window.prompt(`Amount to add to "${g.name}" (use a minus sign to withdraw):`, '');
+    if (!input?.trim()) return;
+    const cents = dollarsToCents(input);
+    if (!cents) return;
+    await contributeToGoal(g.id, cents);
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !target.trim()) return;
+
+    if (editingId) {
+      await updateGoal(editingId, {
+        name: name.trim(),
+        targetCents: dollarsToCents(target),
+        currentCents: dollarsToCents(current || '0'),
+        // null clears the deadline on the server (the client type only models string | undefined)
+        targetDate: (deadline || null) as unknown as string | undefined,
+        category,
+        priority,
+      });
+      setIsAddOpen(false);
+      return;
+    }
 
     addGoal({
       name: name.trim(),
@@ -61,7 +106,7 @@ export function GoalsTab() {
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAdd}
           className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-sky-400" />
@@ -92,6 +137,7 @@ export function GoalsTab() {
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-1">
                   <span
                     className={`text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold uppercase tracking-wider border ${
                       g.priority === 'high'
@@ -103,6 +149,8 @@ export function GoalsTab() {
                   >
                     {g.priority}
                   </span>
+                  <RowActions label={g.name} onEdit={() => openEdit(g)} onDelete={() => deleteGoal(g.id)} />
+                  </div>
                 </div>
 
                 {/* Progress Bar */}
@@ -132,6 +180,13 @@ export function GoalsTab() {
                   {g.targetDate ? `By ${g.targetDate}` : 'Flexible horizon'}
                 </span>
                 <button
+                  onClick={() => handleAddMoney(g)}
+                  className="hover:text-black font-medium transition-colors cursor-pointer flex items-center gap-1 text-emerald-700"
+                >
+                  <PiggyBank className="w-3.5 h-3.5" />
+                  <span className="font-semibold">Add money</span>
+                </button>
+                <button
                   onClick={() => updateGoal(g.id, { isPaused: !g.isPaused })}
                   className="hover:text-black font-medium transition-colors cursor-pointer flex items-center gap-1"
                 >
@@ -158,7 +213,7 @@ export function GoalsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="max-w-md w-full keel-card bg-white p-6 shadow-2xl animate-in zoom-in-95 border border-black/[0.08] text-xs">
             <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] mb-4">
-              <h3 className="text-base font-bold text-[#0F172A]">Define Savings Goal</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Savings Goal' : 'Define Savings Goal'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="text-slate-500 hover:text-black">
                 <X className="w-4 h-4" />
               </button>
@@ -241,7 +296,7 @@ export function GoalsTab() {
                   type="submit"
                   className="px-5 py-2 rounded-full bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold shadow-md cursor-pointer"
                 >
-                  Save Goal
+                  {editingId ? 'Save Changes' : 'Save Goal'}
                 </button>
               </div>
             </form>

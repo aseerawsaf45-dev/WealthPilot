@@ -480,13 +480,13 @@ Vertical slices in this order, each following the `wealthpilot-api-route` skill:
 - **Done when:** with `localStorage` cleared, a logged-in user's data survives a reload and a second browser; every slice has a cross-tenant 404 test; dashboard totals equal the `/reports/summary` totals.
 
 ### P2 — AI copilot (4–5 days)
-- [ ] **AI-01** `ai/schema.ts`, `ai/tools.ts` (first 4 tools), unit tests on fixed data
-- [ ] **AI-02** Move the router from `copilotService.ts` to the server; rules-only `/ai/copilot` working end-to-end
-- [ ] **AI-03** `ai/privacy.ts` (`redactForLlm`, `allowGemini`) + tests
-- [ ] **AI-04** `ai/providers.ts` (Groq + rules; timeouts, failover). *Gemini adapter is **stretch** (it's the same OpenAI-compatible call, but only after everything else works).*
-- [ ] **AI-05** Orchestrator two-pass + grounding check + quotas
-- [ ] **AI-06** Consent dialog in SettingsTab and CopilotTab ("AI is off — turn on?" with plain-language disclosure of providers and what is sent)
-- [ ] **AI-07** Remaining tools (bills, savings plan); evals (§7.7)
+- [x] **AI-01** `ai/schema.ts`, `ai/tools.ts` (8 tools: the 6 in §7.3 + debt summary + rules-only duplicates), tested via evals
+- [x] **AI-02** Server router (`ai/router.ts`); rules-only `/ai/copilot` working end-to-end (signed-out demo keeps the client engine)
+- [x] **AI-03** `ai/privacy.ts` (`redactForLlm`, `allowGemini`, `canUseLlm`) + tests
+- [x] **AI-04** `ai/providers.ts` (Groq + rules; timeouts, failover). Live against Groq since 2026-10-17 (`npm run eval:ai:live`). **Change from §7.1 step 8, from live tests:** router-matched questions skip LLM narration (server template is more complete); the model words only questions it routed itself, never sees numeric values, and spelled-out numbers fail the grounding check like digits. *Gemini adapter is **stretch** (it's the same OpenAI-compatible call, but only after everything else works).*
+- [x] **AI-05** Orchestrator two-pass + grounding check + quotas
+- [x] **AI-06** Consent dialog in SettingsTab and CopilotTab ("AI is off — turn on?" with plain-language disclosure of providers and what is sent)
+- [x] **AI-07** Remaining tools (bills, savings plan); evals (§7.7): 40 cases in `scripts/ai-evals.json`, `npm run eval:ai`. Open: `/ai/messages` chat history
 - **Done when:** evals pass at the bar in §7.7; turning AI off stops all outbound LLM calls immediately (test asserts `fetch` is never called); the demo works with no API keys.
 
 ### P3 — ML insights (3–4 days)

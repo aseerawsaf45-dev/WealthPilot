@@ -37,6 +37,18 @@ export const AccountInput = z.object({
   isIncludedInNetWorth: z.boolean().default(true),
 });
 
+/** balanceCents here is the desired CURRENT balance; the server derives the opening balance from it. */
+export const AccountPatch = z
+  .object({
+    name: text(80),
+    institution: text(80),
+    type: z.enum(['checking', 'savings', 'credit', 'investment', 'cash', 'loan']),
+    accountNumberMask: z.string().trim().regex(/^[•*]{0,4}\s?\d{4}$/, 'Enter only the last 4 digits (e.g. •••• 1234)'),
+    isIncludedInNetWorth: z.boolean(),
+    balanceCents: money,
+  })
+  .partial();
+
 // ---- Transactions -----------------------------------------------------------
 const txStatus = z.enum(['cleared', 'pending', 'reconciled']);
 const tags = z.array(z.string().trim().max(30)).max(10);
@@ -61,6 +73,7 @@ export const SplitInput = z.object({
 
 export const TransactionPatch = z
   .object({
+    accountId: id,
     financialDate: ymd,
     merchant: noPan(120).pipe(z.string().min(1)),
     category: text(60),
@@ -132,7 +145,26 @@ export const BillInput = z.object({
   status: z.enum(['active', 'paused']).default('active'),
 });
 
-const debtCategory = z.enum(['credit_card', 'student_loan', 'car_loan', 'mortgage', 'personal_loan']);
+export const BillPatch = z
+  .object({
+    name: text(80),
+    amountCents: nonNegMoney,
+    frequency: z.enum(['weekly', 'biweekly', 'monthly', 'quarterly', 'annual']),
+    nextDueDate: ymd,
+    category: text(60),
+    accountId: z.string().max(40), // '' = no account
+    isAutoPay: z.boolean(),
+    status: z.enum(['active', 'paused']),
+  })
+  .partial();
+
+/** dueDate must equal the bill's current nextDueDate: makes "mark paid" idempotent (a second click is a 409). */
+export const BillPayInput = z.object({ dueDate: ymd, recordTransaction: z.boolean().default(true) });
+
+/** Positive adds money to a goal, negative withdraws. */
+export const GoalContributionInput = z.object({ amountCents: money.refine((v) => v !== 0, 'Enter an amount') });
+
+const debtCategory =z.enum(['credit_card', 'student_loan', 'car_loan', 'mortgage', 'personal_loan']);
 export const DebtInput = z.object({
   name: text(80),
   balanceCents: nonNegMoney,
@@ -167,6 +199,11 @@ export const PreferencesPatch = z
         dateFormat: z.string().max(20),
         reducedMotion: z.boolean(),
         isDemoMode: z.boolean(),
+        learn: z.object({
+          xp: z.number().int().min(0).max(1_000_000),
+          streak: z.number().int().min(0).max(10_000),
+          completed: z.array(z.string().max(60)).max(200),
+        }),
       })
       .partial()
       .strict(),

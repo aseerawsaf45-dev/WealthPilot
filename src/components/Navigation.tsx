@@ -12,6 +12,7 @@ import {
   TrendingDown,
   Upload,
   GraduationCap,
+  Sparkles,
   Settings,
   Menu,
   X,
@@ -56,6 +57,7 @@ export function Navigation({
     { id: 'goals', label: 'Goals', icon: Target },
     { id: 'bills', label: 'Bills', icon: CalendarDays },
     { id: 'planning', label: 'Debt Planner', icon: TrendingDown },
+    { id: 'copilot', label: 'Copilot', icon: Sparkles },
     { id: 'learn', label: 'Learn', icon: GraduationCap, badge: 'XP' },
     { id: 'import', label: 'Import', icon: Upload },
   ];

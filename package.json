@@ -18,7 +18,9 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "test:integration": "tsx --env-file=.env --test scripts/integration.mts"
+    "test:integration": "tsx --env-file=.env --test scripts/integration.mts",
+    "eval:ai": "tsx scripts/ai-evals.mts",
+    "eval:ai:live": "tsx --env-file=.env scripts/ai-live-check.mts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

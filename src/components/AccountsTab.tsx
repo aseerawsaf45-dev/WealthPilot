@@ -5,6 +5,7 @@ import { useFinance } from '../context/FinanceContext';
 import { FinancialAccount, AccountType } from '../types/finance';
 import { formatMoney, dollarsToCents } from '../lib/money';
 import { AssetAllocationChart } from './InteractiveCharts';
+import { RowActions } from './RowActions';
 import {
   Wallet,
   Building,
@@ -18,8 +19,9 @@ import {
 } from 'lucide-react';
 
 export function AccountsTab() {
-  const { accounts, addAccount } = useFinance();
+  const { accounts, addAccount, updateAccount, removeAccount } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>('ALL');
 
   // Add Account Form State
@@ -29,13 +31,54 @@ export function AccountsTab() {
   const [balance, setBalance] = useState('');
   const [accountMask, setAccountMask] = useState('•••• 1234');
 
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const openAdd = () => {
+    setEditingId(null);
+    setName('');
+    setInstitution('');
+    setType('checking');
+    setBalance('');
+    setAccountMask('•••• 1234');
+    setIsAddOpen(true);
+  };
+
+  const openEdit = (acc: FinancialAccount) => {
+    setEditingId(acc.id);
+    setName(acc.name);
+    setInstitution(acc.institution);
+    setType(acc.type);
+    setBalance((Math.abs(acc.balanceCents) / 100).toFixed(2));
+    setAccountMask(acc.accountNumberMask);
+    setIsAddOpen(true);
+  };
+
+  const handleDelete = async (acc: FinancialAccount) => {
+    const res = await removeAccount(acc.id);
+    // An account with transactions needs a second, explicit confirmation.
+    if (res.conflict && window.confirm(`${res.conflict} Delete "${acc.name}" and its transactions?`)) {
+      await removeAccount(acc.id, true);
+    }
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
     const baseCents = dollarsToCents(balance || '0');
     // Liabilities have negative balances
     const balanceCents = type === 'credit' || type === 'loan' ? -Math.abs(baseCents) : Math.abs(baseCents);
+
+    if (editingId) {
+      // balanceCents = the balance as of today; the server keeps it consistent with the transactions.
+      const saved = await updateAccount(editingId, {
+        name: name.trim(),
+        institution: institution.trim() || 'Manual Institution',
+        type,
+        balanceCents,
+        accountNumberMask: accountMask.trim(),
+      });
+      if (saved) setIsAddOpen(false);
+      return;
+    }
 
     addAccount({
       name: name.trim(),
@@ -92,7 +135,7 @@ export function AccountsTab() {
         </div>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAdd}
           className="btn-primary-anim btn-shimmer flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold text-xs transition-all shadow-md cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5 text-sky-400" />
@@ -144,11 +187,14 @@ export function AccountsTab() {
                   </div>
                 </div>
 
-                <span className={`text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider font-mono font-bold ${
-                  isNegative ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                }`}>
-                  {acc.type}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-2.5 py-0.5 rounded-full uppercase tracking-wider font-mono font-bold ${
+                    isNegative ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    {acc.type}
+                  </span>
+                  <RowActions label={acc.name} onEdit={() => openEdit(acc)} onDelete={() => handleDelete(acc)} />
+                </div>
               </div>
 
               <div className="pt-2">
@@ -175,7 +221,7 @@ export function AccountsTab() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-md">
           <div className="max-w-md w-full bg-white/95 backdrop-blur-2xl p-7 sm:p-8 rounded-3xl border border-white/90 shadow-2xl animate-in zoom-in-95 text-xs">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-5">
-              <h3 className="text-base font-bold text-[#0F172A]">Add Financial Account</h3>
+              <h3 className="text-base font-bold text-[#0F172A]">{editingId ? 'Edit Financial Account' : 'Add Financial Account'}</h3>
               <button onClick={() => setIsAddOpen(false)} className="btn-anim text-slate-400 hover:text-slate-700 p-1 rounded-full cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
@@ -260,7 +306,7 @@ export function AccountsTab() {
                   type="submit"
                   className="btn-primary-anim btn-shimmer px-6 py-2.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-semibold shadow-md cursor-pointer"
                 >
-                  Create Account
+                  {editingId ? 'Save Changes' : 'Create Account'}
                 </button>
               </div>
             </form>

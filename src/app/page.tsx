@@ -12,6 +12,7 @@ import { BillsTab } from '../components/BillsTab';
 import { PlanningTab } from '../components/PlanningTab';
 import { LearnTab } from '../components/LearnTab';
 import { ImportTab } from '../components/ImportTab';
+import { CopilotTab } from '../components/CopilotTab';
 import { SettingsTab } from '../components/SettingsTab';
 import { LandingPage } from '../components/LandingPage';
 import { AuthModal } from '../components/AuthModal';
@@ -195,6 +196,7 @@ function WealthPilotApp() {
         {activeTab === 'bills' && <BillsTab />}
         {activeTab === 'planning' && <PlanningTab />}
         {activeTab === 'learn' && <LearnTab />}
+        {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} />}
         {activeTab === 'import' && <ImportTab />}
         {activeTab === 'settings' && <SettingsTab />}
       </main>

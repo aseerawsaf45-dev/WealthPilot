@@ -10,7 +10,7 @@ import { prisma } from '../db';
 import { writeAudit, sha256 } from '../audit';
 import { HttpError } from '../http';
 import { toClientAccount, toClientTransaction } from '../mappers';
-import { AccountInput, TransactionInput, TransactionPatch, ImportRow } from '../schemas';
+import { AccountInput, AccountPatch, TransactionInput, TransactionPatch, ImportRow } from '../schemas';
 import { autoCategorizeMerchant } from '@/services/financeService';
 import { assertSoxSplitPreservation } from '@/lib/compliance/soxCompliance';
 import type { AccountType as DbAccountType, TransactionStatus } from '@prisma/client';
@@ -55,6 +55,54 @@ export async function createAccount(userId: string, input: z.infer<typeof Accoun
     return created;
   });
   return toClientAccount(row, BigInt(0));
+}
+
+export async function patchAccount(userId: string, id: string, patch: z.infer<typeof AccountPatch>) {
+  const existing = await prisma.financialAccount.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Account');
+
+  // Balances are derived, so "set balance to X" means opening = X − SUM(live transactions).
+  let openingBalanceCents: bigint | undefined;
+  if (patch.balanceCents !== undefined) {
+    const agg = await prisma.transaction.aggregate({ where: { userId, accountId: id, status: LIVE }, _sum: { amountCents: true } });
+    openingBalanceCents = BigInt(patch.balanceCents) - (agg._sum.amountCents ?? BigInt(0));
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.financialAccount.update({
+      where: { id },
+      data: {
+        name: patch.name,
+        institution: patch.institution,
+        type: patch.type ? (patch.type.toUpperCase() as DbAccountType) : undefined,
+        accountNumberMask: patch.accountNumberMask,
+        isIncludedInNetWorth: patch.isIncludedInNetWorth,
+        openingBalanceCents,
+        balanceCents: patch.balanceCents === undefined ? undefined : BigInt(patch.balanceCents),
+      },
+    });
+    await writeAudit(tx, userId, 'ACCOUNT_UPDATED', `account=${id} fields=${Object.keys(patch).join(',')}`);
+  });
+  return accountWithBalance(userId, id);
+}
+
+/**
+ * Deleting an account deletes its transactions (FK cascade), so it is refused with 409 while
+ * live transactions exist unless the caller confirmed with cascade=true. Bills keep existing
+ * with no payment account (FK SetNull).
+ */
+export async function deleteAccount(userId: string, id: string, cascade: boolean) {
+  const existing = await prisma.financialAccount.findFirst({ where: { id, userId }, select: { id: true } });
+  if (!existing) throw notFound('Account');
+  const liveCount = await prisma.transaction.count({ where: { userId, accountId: id, status: LIVE } });
+  if (liveCount > 0 && !cascade) {
+    throw new HttpError('CONFLICT', `This account has ${liveCount} transactions. Deleting it also deletes them.`, 409);
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.financialAccount.delete({ where: { id } });
+    await writeAudit(tx, userId, 'ACCOUNT_DELETED', `account=${id} transactions=${liveCount}`);
+  });
+  return { id, deletedTransactions: liveCount };
 }
 
 async function userRules(userId: string) {
@@ -110,6 +158,12 @@ export async function updateTransaction(userId: string, id: string, patch: z.inf
   const existing = await prisma.transaction.findFirst({ where: { id, userId, status: LIVE }, include: { splits: true } });
   if (!existing) throw notFound('Transaction');
 
+  const moved = patch.accountId !== undefined && patch.accountId !== existing.accountId;
+  if (moved) {
+    const target = await prisma.financialAccount.findFirst({ where: { id: patch.accountId, userId }, select: { id: true } });
+    if (!target) throw notFound('Account');
+  }
+
   const amountCents = patch.amountCents ?? Number(existing.amountCents);
   if (patch.splits?.length) {
     const check = assertSoxSplitPreservation(amountCents, patch.splits);
@@ -130,6 +184,7 @@ export async function updateTransaction(userId: string, id: string, patch: z.inf
     const updated = await tx.transaction.update({
       where: { id },
       data: {
+        accountId: moved ? patch.accountId : undefined,
         financialDate: patch.financialDate,
         merchant: patch.merchant,
         normalizedMerchant: patch.merchant?.trim(),
@@ -145,7 +200,11 @@ export async function updateTransaction(userId: string, id: string, patch: z.inf
     await writeAudit(tx, userId, 'TRANSACTION_UPDATED', `transaction=${id} fields=${Object.keys(patch).join(',')}`);
     return updated;
   });
-  return { transaction: toClientTransaction(row), account: await accountWithBalance(userId, row.accountId) };
+  return {
+    transaction: toClientTransaction(row),
+    account: await accountWithBalance(userId, row.accountId),
+    previousAccount: moved ? await accountWithBalance(userId, existing.accountId) : null,
+  };
 }
 
 /** Delete = VOID (audit trail kept; derived balance updates automatically). */
