@@ -417,26 +417,141 @@ describe('Authentication & NIST SP 800-63B Security', () => {
   });
 
   it('signs and verifies tamper-evident HMAC session tokens', async () => {
+    process.env.SESSION_SECRET ??= 'test-secret-that-is-at-least-32-bytes-long!!';
     const { createSessionToken, verifySessionToken } = await import('../src/lib/auth/session.ts');
-    const token = createSessionToken({
-      id: 'user_aseer',
-      email: 'aseer@wealthpilot.app',
-      name: 'Aseer',
-      preferredCurrency: 'USD',
-    });
+    const token = createSessionToken({ sid: 'sess_1', userId: 'user_aseer' });
 
     assert.ok(typeof token === 'string' && token.split('.').length === 3);
 
     const session = verifySessionToken(token);
     assert.ok(session !== null);
     assert.strictEqual(session?.userId, 'user_aseer');
-    assert.strictEqual(session?.email, 'aseer@wealthpilot.app');
-    assert.strictEqual(session?.name, 'Aseer');
+    assert.strictEqual(session?.sid, 'sess_1');
+    assert.ok(!('email' in (session ?? {})), 'Token must not carry PII');
 
     // Tampering test: modify a byte in payload
     const parts = token.split('.');
     const tamperedToken = `${parts[0]}.${parts[1]}A.${parts[2]}`;
     assert.strictEqual(verifySessionToken(tamperedToken), null, 'Tampered token must be rejected');
+  });
+
+  it('rejects a token forged with the old hardcoded fallback secret (SEC-01)', async () => {
+    process.env.SESSION_SECRET ??= 'test-secret-that-is-at-least-32-bytes-long!!';
+    const crypto = await import('node:crypto');
+    const { verifySessionToken } = await import('../src/lib/auth/session.ts');
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const now = Math.floor(Date.now() / 1000);
+    const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sid: 's', userId: 'user_aseer', iat: now, exp: now + 3600 })}`;
+    const forgedSig = crypto.createHmac('sha256', 'wealthpilot-audit-standard-secret-key-2026-fintech').update(data).digest('base64url');
+    assert.strictEqual(verifySessionToken(`${data}.${forgedSig}`), null);
+  });
+
+  it('refuses to sign without a strong SESSION_SECRET', async () => {
+    const { createSessionToken } = await import('../src/lib/auth/session.ts');
+    const saved = process.env.SESSION_SECRET;
+    process.env.SESSION_SECRET = 'short';
+    try {
+      assert.throws(() => createSessionToken({ sid: 's', userId: 'u' }), /SESSION_SECRET/);
+    } finally {
+      process.env.SESSION_SECRET = saved;
+    }
+  });
+});
+
+describe('Server mappers, fingerprints & audit chain (pure)', () => {
+  it('derives budget spend per category: expenses only, transfers skipped, splits by their own category', async () => {
+    const { spendByCategory } = await import('../src/server/mappers.ts');
+    const spent = spendByCategory(
+      [
+        { financialDate: '2026-10-03', amountCents: -1000, category: 'Dining', isTransfer: false },
+        { financialDate: '2026-10-04', amountCents: 5000, category: 'Dining', isTransfer: false }, // refund/income ignored
+        { financialDate: '2026-10-05', amountCents: -9999, category: 'Dining', isTransfer: true },
+        { financialDate: '2026-09-30', amountCents: -700, category: 'Dining', isTransfer: false }, // other month
+        {
+          financialDate: '2026-10-06',
+          amountCents: -3000,
+          category: 'Groceries',
+          isTransfer: false,
+          splits: [{ category: 'Groceries', amountCents: -2000 }, { category: 'Household', amountCents: -1000 }],
+        },
+      ],
+      '2026-10'
+    );
+    assert.strictEqual(spent.get('Dining'), 1000);
+    assert.strictEqual(spent.get('Groceries'), 2000);
+    assert.strictEqual(spent.get('Household'), 1000);
+  });
+
+  it('derives bill state in the user timezone', async () => {
+    const { billState, todayIn } = await import('../src/server/mappers.ts');
+    assert.strictEqual(billState('2026-10-16', 'active', '2026-10-17'), 'overdue');
+    assert.strictEqual(billState('2026-10-24', 'active', '2026-10-17'), 'due_soon');
+    assert.strictEqual(billState('2026-10-25', 'active', '2026-10-17'), 'active');
+    assert.strictEqual(billState('2026-10-01', 'paused', '2026-10-17'), 'paused');
+    // 2026-10-17T02:00Z is still Oct 16 in New York
+    assert.strictEqual(todayIn('America/New_York', new Date('2026-10-17T02:00:00Z')), '2026-10-16');
+    assert.strictEqual(todayIn('Not/AZone', new Date('2026-10-17T02:00:00Z')), '2026-10-17');
+  });
+
+  it('refuses to put unsafe integers on the wire', async () => {
+    const { cents } = await import('../src/server/mappers.ts');
+    assert.strictEqual(cents(BigInt(123456)), 123456);
+    assert.throws(() => cents(BigInt('9007199254740993')), RangeError);
+  });
+
+  it('gives identical CSV rows distinct import fingerprints, stable across re-imports', async () => {
+    const { importFingerprints } = await import('../src/server/repos/ledger.ts');
+    const rows = [
+      { financialDate: '2026-10-10', merchant: 'Blue Bottle', amountCents: -650 },
+      { financialDate: '2026-10-10', merchant: 'blue bottle ', amountCents: -650 },
+      { financialDate: '2026-10-11', merchant: 'Blue Bottle', amountCents: -650 },
+    ];
+    const a = importFingerprints(rows);
+    assert.strictEqual(new Set(a).size, 3, 'two coffees on one day must not collide');
+    assert.deepStrictEqual(importFingerprints(rows), a, 're-importing the same file maps to the same fingerprints');
+  });
+
+  it('chains audit hashes so editing any earlier row breaks every later hash', async () => {
+    const { chainHash } = await import('../src/server/audit.ts');
+    const at = new Date('2026-10-17T00:00:00.000Z');
+    const e1 = { userId: 'u1', eventType: 'A', actor: 'USER', details: 'x', createdAt: at };
+    const h1 = chainHash(null, e1);
+    const h2 = chainHash(h1, { ...e1, eventType: 'B' });
+    assert.match(h1, /^[0-9a-f]{64}$/);
+    assert.notStrictEqual(chainHash(chainHash(null, { ...e1, details: 'tampered' }), { ...e1, eventType: 'B' }), h2);
+  });
+});
+
+describe('CSRF origin check', () => {
+  it('allows same-host browsers on any dev host, blocks cross-site', async () => {
+    const { assertSameOrigin } = await import('../src/server/http.ts');
+    const req = (host: string, headers: Record<string, string> = {}) =>
+      new Request(`http://localhost:3000/api/v1/auth/login`, { method: 'POST', headers: { host, ...headers } });
+
+    assert.strictEqual(assertSameOrigin(req('localhost:3000', { origin: 'http://localhost:3000' })), null);
+    assert.strictEqual(assertSameOrigin(req('127.0.0.1:3000', { origin: 'http://127.0.0.1:3000' })), null);
+    assert.strictEqual(assertSameOrigin(req('192.168.0.100:3000', { origin: 'http://192.168.0.100:3000' })), null);
+    assert.strictEqual(assertSameOrigin(req('localhost:3000')), null, 'no Origin (curl) passes');
+    assert.strictEqual(assertSameOrigin(req('localhost:3000', { origin: 'https://evil.example' }))?.status, 403);
+    assert.strictEqual(assertSameOrigin(req('localhost:3000', { origin: 'null' }))?.status, 403);
+    assert.strictEqual(
+      assertSameOrigin(req('localhost:3000', { origin: 'http://localhost:3000', 'sec-fetch-site': 'cross-site' }))?.status,
+      403
+    );
+  });
+});
+
+describe('API input validation (trust boundary)', () => {
+  it('rejects card numbers, float money and bad dates', async () => {
+    const { TransactionInput, AccountInput } = await import('../src/server/schemas.ts');
+    const base = { accountId: 'a', financialDate: '2026-10-10', merchant: 'Shop', amountCents: -500 };
+    assert.ok(TransactionInput.safeParse(base).success);
+    assert.ok(!TransactionInput.safeParse({ ...base, amountCents: -5.5 }).success, 'float cents rejected');
+    assert.ok(!TransactionInput.safeParse({ ...base, financialDate: '2026-02-30' }).success, 'impossible date rejected');
+    assert.ok(!TransactionInput.safeParse({ ...base, notes: 'card 4111 1111 1111 1111' }).success, 'PAN rejected');
+    const acc = { name: 'A', institution: 'B', type: 'checking', balanceCents: 0 };
+    assert.ok(AccountInput.safeParse({ ...acc, accountNumberMask: '•••• 1234' }).success);
+    assert.ok(!AccountInput.safeParse({ ...acc, accountNumberMask: '4111111111111111' }).success, 'full numbers rejected');
   });
 });
 

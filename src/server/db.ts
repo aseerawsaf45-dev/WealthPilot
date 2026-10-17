@@ -15,7 +15,9 @@ if (typeof BigInt !== 'undefined' && !('toJSON' in BigInt.prototype)) {
     get() {
       return () => {
         const num = Number(this);
-        return Number.isSafeInteger(num) ? num : this.toString();
+        // Money goes on the wire as JSON numbers only; never silently switch to strings.
+        if (!Number.isSafeInteger(num)) throw new RangeError('BigInt amount exceeds safe JSON integer range');
+        return num;
       };
     },
     configurable: true,

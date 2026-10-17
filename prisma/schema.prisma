@@ -30,7 +30,14 @@ model User {
   passwordHash      String?   // Salted hash for credentials auth (Argon2id/Bcrypt)
   preferredCurrency String    @default("USD") // "USD" or "BDT"
   timezone          String    @default("UTC")
-  isAiEnabled       Boolean   @default(true)  // GDPR Art. 25 AI Kill Switch
+  isAiEnabled       Boolean   @default(false) // Opt-in; only /user/ai-consent writes it (SEC-11)
+  aiConsentAt       DateTime?
+  aiConsentVersion  String?
+  aiProviders       String[]  @default([])
+  chatHistoryEnabled Boolean  @default(false)
+  region            String?   // ISO-3166 alpha-2, user-declared; null = most restrictive rules
+  uiPrefs           Json      @default("{}") // theme, locale, dateFormat, reducedMotion, isDemoMode: UI-only
+  passwordChangedAt DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -43,6 +50,8 @@ model User {
   debts             DebtAccount[]
   auditLogs         AuditEvent[]
   copilotMessages   CopilotMessage[]
+  sessions          Session[]
+  merchantRules     MerchantRule[]
 
   @@map("users")
 }
@@ -68,7 +77,8 @@ model FinancialAccount {
   institution           String
   type                  AccountType   @default(CHECKING)
   currency              String        @default("USD")
-  balanceCents          BigInt        @default(0) // Integer minor-units
+  balanceCents          BigInt        @default(0) // Legacy cache; the API derives balance = opening + SUM(non-VOID tx)
+  openingBalanceCents   BigInt        @default(0)
   accountNumberMask     String        // GLBA 16 CFR § 314.4 compliant (e.g. "•••• 4821")
   isManual              Boolean       @default(true)
   isIncludedInNetWorth  Boolean       @default(true)
@@ -118,7 +128,8 @@ model Transaction {
   isTransfer            Boolean             @default(false)
   linkedTransferId      String?             // For transfer pairing
   source                TransactionSource   @default(MANUAL)
-  importFingerprint     String?             // SHA-256 deduplication fingerprint
+  importFingerprint     String?             // sha256, CSV_IMPORT rows only; NULL when voided
+  importBatchId         String?
   notes                 String?
   tags                  String[]            @default([])
   createdAt             DateTime            @default(now())
@@ -129,7 +140,8 @@ model Transaction {
   @@index([userId, financialDate])
   @@index([userId, category])
   @@index([accountId])
-  @@index([importFingerprint])
+  @@unique([userId, importFingerprint])
+  @@index([userId, importBatchId])
   @@map("transactions")
 }
 
@@ -179,6 +191,7 @@ model SavingsGoal {
   currentCents        BigInt    @default(0)
   targetDate          String?   // YYYY-MM-DD (optional for flexible milestones)
   category            String
+  priority            String    @default("medium") // low | medium | high
   isPaused            Boolean   @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
@@ -276,4 +289,39 @@ model CopilotMessage {
 
   @@index([userId, createdAt])
   @@map("copilot_messages")
+}
+
+// -----------------------------------------------------------------------------
+// SESSIONS, RATE LIMITS, CATEGORIZATION RULES
+// -----------------------------------------------------------------------------
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model RateLimitBucket {
+  key     String   @id // e.g. "login:email:<sha256>"; never raw emails or IPs
+  count   Int
+  resetAt DateTime
+
+  @@map("rate_limit_buckets")
+}
+
+model MerchantRule {
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  normalizedMerchant String   // lower-cased keyword matched with "contains"
+  category           String
+  updatedAt          DateTime @updatedAt
+
+  @@id([userId, normalizedMerchant])
+  @@map("merchant_rules")
 }

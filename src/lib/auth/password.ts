@@ -9,7 +9,10 @@
 
 import bcrypt from 'bcryptjs';
 
-const BCRYPT_SALT_ROUNDS = 10;
+const BCRYPT_SALT_ROUNDS = 12;
+
+// Compared against when the email is unknown, so login takes the same time either way (SEC-12).
+const DUMMY_HASH = bcrypt.hashSync('wealthpilot-timing-equalizer', BCRYPT_SALT_ROUNDS);
 
 export interface PasswordValidationResult {
   valid: boolean;
@@ -61,6 +64,25 @@ export async function comparePassword(password: string, hash: string): Promise<b
   if (!password || !hash) return false;
   try {
     return await bcrypt.compare(password, hash);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compares against a fixed dummy hash. Call it when no user matched, so the
+ * response time doesn't reveal whether the email exists.
+ */
+export async function burnPasswordCompare(password: string): Promise<void> {
+  await bcrypt.compare(password || 'x', DUMMY_HASH);
+}
+
+/**
+ * True when a stored hash uses a lower cost than today's standard (rehash on next login).
+ */
+export function needsRehash(hash: string): boolean {
+  try {
+    return bcrypt.getRounds(hash) < BCRYPT_SALT_ROUNDS;
   } catch {
     return false;
   }

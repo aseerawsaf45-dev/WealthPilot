@@ -41,7 +41,7 @@ export function Navigation({
   onOpenLanding,
   onOpenAuth,
 }: NavigationProps) {
-  const { preferences, logout, deleteAccount } = useFinance();
+  const { preferences, logout } = useFinance();
   const displayName = preferences?.userName?.trim() || 'User';
   const displayEmail = preferences?.userEmail?.trim() || 'aseer@wealthpilot.app';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -242,15 +242,10 @@ export function Navigation({
                     <div className="border-t border-slate-100 my-1" />
 
                     <button
-                      onClick={async () => {
-                        const confirmed = window.confirm(
-                          'GDPR Article 17 Erasure:\n\nAre you sure you want to permanently delete your account and eradicate all financial accounts, transactions, and audit trails from Neon PostgreSQL? This cannot be undone.'
-                        );
-                        if (confirmed) {
-                          await deleteAccount();
-                          setUserMenuOpen(false);
-                          alert('Account and all associated records permanently eradicated under GDPR Article 17.');
-                        }
+                      onClick={() => {
+                        // Deletion needs password re-entry; the confirm dialog lives in Settings → Danger Zone.
+                        handleSelectTab('settings');
+                        setUserMenuOpen(false);
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
                     >

@@ -33,7 +33,7 @@ function WealthPilotApp() {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
 
-  const { accounts, addTransaction } = useFinance();
+  const { accounts, addTransaction, preferences, isReady, syncError, clearSyncError } = useFinance();
 
   // Sync hash on mount and hash changes
   useEffect(() => {
@@ -160,6 +160,28 @@ function WealthPilotApp() {
 
       {/* Main Workspace Stage with Generous Spacing and Breathing Room */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-32 sm:pb-24">
+        {isReady && !preferences.isAuthenticated && (
+          <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
+            <span>Demo data — not saved. Changes disappear when you reload.</span>
+            <button
+              onClick={() => {
+                setAuthModalMode('signin');
+                setAuthModalOpen(true);
+              }}
+              className="rounded-full bg-amber-900 px-3 py-1.5 text-white hover:bg-amber-800 cursor-pointer"
+            >
+              Sign in to save your data
+            </button>
+          </div>
+        )}
+        {syncError && (
+          <div role="alert" className="fixed bottom-6 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-rose-300 bg-white px-4 py-3 text-xs font-semibold text-rose-800 shadow-lg">
+            <span>{syncError}</span>
+            <button onClick={clearSyncError} aria-label="Dismiss error" className="rounded-full p-1 text-rose-600 hover:bg-rose-50 cursor-pointer">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         {activeTab === 'overview' && (
           <OverviewTab
             setActiveTab={setActiveTab}

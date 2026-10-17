@@ -19,6 +19,7 @@ import {
   initialGoals,
   initialBills,
   initialDebts,
+  defaultPreferences,
 } from '../src/lib/seedData';
 import { createSoxAuditEntry } from '../src/lib/compliance/soxCompliance';
 import { hashPasswordSync } from '../src/lib/auth/password';
@@ -37,7 +38,7 @@ async function main() {
     update: {
       passwordHash,
       preferredCurrency: 'USD',
-      isAiEnabled: true,
+      isAiEnabled: false, // opt-in via /user/ai-consent only
     },
     create: {
       id: aseerUserId,
@@ -46,7 +47,7 @@ async function main() {
       passwordHash,
       preferredCurrency: 'USD',
       timezone: 'America/New_York',
-      isAiEnabled: true,
+      isAiEnabled: false, // opt-in via /user/ai-consent only
     },
   });
   console.log(`   ✓ Primary User provisioned: ${aseerUser.name} (${aseerUser.email})`);
@@ -58,7 +59,7 @@ async function main() {
     update: {
       passwordHash,
       preferredCurrency: 'USD',
-      isAiEnabled: true,
+      isAiEnabled: false, // opt-in via /user/ai-consent only
     },
     create: {
       id: demoUserId,
@@ -67,13 +68,15 @@ async function main() {
       passwordHash,
       preferredCurrency: 'USD',
       timezone: 'America/New_York',
-      isAiEnabled: true,
+      isAiEnabled: false, // opt-in via /user/ai-consent only
     },
   });
 
   const targetUserId = aseerUser.id;
 
-  // 2. Provision Financial Accounts
+  // 2. Provision Financial Accounts (live balance is derived: opening + SUM(non-VOID transactions))
+  const openingFor = (accId: string, balance: number) =>
+    BigInt(balance - initialTransactions.filter((t) => t.accountId === accId).reduce((s, t) => s + t.amountCents, 0));
   for (const acc of initialAccounts) {
     const accountType = acc.type.toUpperCase() as AccountType;
     await prisma.financialAccount.upsert({
@@ -81,6 +84,7 @@ async function main() {
       update: {
         userId: targetUserId,
         balanceCents: BigInt(acc.balanceCents),
+        openingBalanceCents: openingFor(acc.id, acc.balanceCents),
         lastSyncedAt: new Date(acc.lastSyncedAt),
       },
       create: {
@@ -91,6 +95,7 @@ async function main() {
         type: accountType,
         currency: acc.currency,
         balanceCents: BigInt(acc.balanceCents),
+        openingBalanceCents: openingFor(acc.id, acc.balanceCents),
         accountNumberMask: acc.accountNumberMask,
         isManual: acc.isManual,
         isIncludedInNetWorth: acc.isIncludedInNetWorth,
@@ -125,8 +130,7 @@ async function main() {
         currency: tx.currency,
         status,
         isTransfer: tx.isTransfer,
-        source,
-        importFingerprint: tx.importFingerprint,
+        source, // importFingerprint is only set on CSV_IMPORT rows (unique per user)
         notes: tx.notes,
         tags: tx.tags,
       },
@@ -174,6 +178,7 @@ async function main() {
         currentCents: BigInt(goal.currentCents),
         targetDate: goal.targetDate || null,
         category: goal.category,
+        priority: goal.priority,
         isPaused: goal.isPaused ?? false,
       },
     });
@@ -226,6 +231,16 @@ async function main() {
     });
   }
   console.log(`   ✓ Seeded ${initialDebts.length} debt accounts (Snowball/Avalanche)`);
+
+  // 7b. Auto-categorization rules (keyword match, stored lower-case)
+  await prisma.merchantRule.createMany({
+    data: defaultPreferences.autoCategorizationRules.map((r) => ({
+      userId: targetUserId,
+      normalizedMerchant: r.keyword.toLowerCase(),
+      category: r.category,
+    })),
+    skipDuplicates: true,
+  });
 
   // 8. Create SOX 302 Compliant Initial Audit Entry
   const soxAudit = createSoxAuditEntry('SYSTEM_SEEDER', 'ACCOUNT', 'seed_batch_001', 'CREATE', {

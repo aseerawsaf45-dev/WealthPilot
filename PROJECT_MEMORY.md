@@ -5,19 +5,36 @@
 
 ---
 
+<!-- agent-context:start -->
+### Agent quick context (verified 2026-10-17 — keep this block short and true)
+- **Plan of record:** `BACKEND_AND_AI_PLAN.md` (task IDs SEC-*, API-*, AI-*, ML-*, OPS-*). Work top-down by phase. **Next: P2 (AI-01..07).**
+- **Stack:** Next.js 16.4 App Router (read `node_modules/next/dist/docs/` before writing routes) · React 19 · Prisma 6.19 · Neon Postgres · Zod 4 · single repo, backend = `src/app/api/v1/**` route handlers.
+- **Real state:** P0 security + P1 core APIs done. Signed in, `FinanceContext` loads `GET /api/v1/bootstrap` and every action calls the API (applies the server response). Signed out = in-memory seed data with a "Demo data — not saved" banner; no financial `localStorage`. Server layer: `src/server/{http,audit,rateLimit,mappers,schemas}.ts` + `repos/{ledger,planning,user}.ts` (routes never call Prisma outside `auth/`; `check:security` enforces it). Copilot is still the rule-based client mock (`src/services/copilotService.ts`).
+- **DB:** Prisma migrations now exist (`0_init` baseline + `1_sessions_ratelimits_derived_balances`, applied to Neon `production`). Balances are DERIVED: `openingBalanceCents` + SUM(non-VOID tx). Neon project `quiet-forest-08883816`; backup branch `backup-before-p0-p1-2026-10-17`; scratch branch `migration-test-1` (safe to delete).
+- **Not done from P0/P1:** SEC-09 (demo password `admin123` still in seed + AuthModal demo button), OPS-01, account PATCH/DELETE, bill pay + bill PATCH, goal contributions, `/reports/*` (API-09), `/user/export`, budget DELETE, transfer pairs, cursor pagination (bootstrap returns newest 2,000 tx). AI consent toggle calls `/user/ai-consent` but has no disclosure dialog yet (AI-06).
+- **Latency:** each DB round trip from the dev machine to `us-east-2` is ~0.5 s, so local writes take 4–6 s. Expected to be far lower when deployed in a US-East region.
+- **AI provider rule:** Groq (Zero Data Retention on) is primary. Gemini free tier may be used **only** with de-identified aggregates and **never** for EEA/UK/CH users (Google Unpaid Services terms). Rule-based fallback must always work offline.
+- **Invariants:** integer minor units (BigInt cents) only · every query scoped by session userId · LLM never computes totals or sees raw rows · AI is opt-in (only `/user/ai-consent` writes `isAiEnabled`).
+- **Checks:** `npm test` (40 passing) · `npm run test:integration` (6 passing; hits the DB in `.env`) · `npx tsc --noEmit` (clean) · `npx eslint src` (8 errors, pre-existing) · `npm run check:security` (0 errors).
+- **Env:** `SESSION_SECRET`, `AUDIT_PEPPER`, `APP_URL` are required (added to local `.env` 2026-10-17; set separately on Vercel).
+- **Git hooks** in `.githooks/` are inactive until `git config core.hooksPath .githooks` (OPS-01).
+<!-- agent-context:end -->
+
+---
+
 ## 1. Executive Progress Dashboard
 
 ```
-Overall Project Completion: [==========================    ] 85%
-
 [X] Phase 1: UX/UI Design System & Presentation Layer          (100%)
 [X] Phase 2: Client Financial State & Deterministic Math       (100%)
 [X] Phase 2.5: Build System Hardening & Tailwind v4 Engine      (100%)
 [X] Phase 3: PostgreSQL Database & Multi-Tenant Schema         (100%)
-[X] Phase 4: Server Route Handlers & Auth API Layer            (100%)
-[ ] Phase 5: Free AI Copilot Tool Calling (Gemini Flash)       (0%)   <-- CURRENT MILESTONE
-[ ] Phase 6: Statistical ML Forecasting & Outlier Detection    (0%)
-[ ] Phase 7: Regulatory Compliance Verification & Final Audit  (0%)
+[~] Phase 4: Server Route Handlers & Auth API Layer            (auth only; domain APIs not started)
+[ ] Plan P0: Security fixes SEC-01..12                         <-- CURRENT MILESTONE
+[ ] Plan P1: Domain APIs + FinanceContext migration (API-*)
+[ ] Plan P2: AI copilot with server tools (AI-*)
+[ ] Plan P3: ML insights (ML-*)
+[ ] Plan P4-P5: Offers, hardening, demo readiness (OFR-*, OPS-*)
 ```
 
 ---
@@ -83,14 +100,7 @@ Overall Project Completion: [==========================    ] 85%
 
 ## 4. Work in Progress (WIP) & Upcoming Roadmap
 
-| Priority | Task ID | Description | Target Files | Status |
-| :---: | :---: | :--- | :--- | :---: |
-| 🟢 Done | **BE-01** | Create Prisma schema, client singleton, and database seeding | `prisma/schema.prisma`, `src/server/db.ts`, `prisma/seed.ts` | **Completed** ✅ |
-| 🔴 High | **BE-02** | Implement NextAuth.js v5 authentication & session route handlers | `src/app/api/auth/[...nextauth]/route.ts` | **Next Up** |
-| 🟡 Med | **BE-03** | Migrate in-memory finance context to server Route Handlers | `src/app/api/transactions/route.ts`, `src/app/api/dashboard/route.ts` | Queued |
-| 🔴 High | **AI-01** | Implement Gemini Flash Tool-Calling copilot route handler | `src/app/api/ai/copilot/route.ts`, `src/server/ai/geminiClient.ts` | Queued |
-| 🟡 Med | **ML-01** | Implement Holt-Winters cash-flow forecasting & Z-Score anomaly API | `src/server/services/forecastService.ts`, `src/app/api/ml/*` | Queued |
-| 🟢 Low | **SEC-01**| GDPR Data Export & Account Deletion endpoints | `src/app/api/user/export/route.ts`, `src/app/api/user/account/route.ts`| Queued |
+The task list now lives in `BACKEND_AND_AI_PLAN.md` §9 (task IDs SEC-*, API-*, AI-*, ML-*, OFR-*, OPS-*). Mark tasks done there and add a line to `.agents/memory/log.md`. BE-01 (Prisma schema, client, seed) is complete. BE-02 (NextAuth) is **cancelled**: custom HMAC session auth is kept and hardened instead (ADR-006 in the plan).
 
 ---
 

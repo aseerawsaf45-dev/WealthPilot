@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   FinancialAccount,
   Transaction,
@@ -21,9 +21,34 @@ import {
   initialDebts,
   defaultPreferences,
 } from '../lib/seedData';
-import { logAuditEvent } from '../services/auditService';
 import { autoCategorizeMerchant } from '../services/financeService';
-import { generateTransactionFingerprint } from '../services/importService';
+import { api, ApiError } from '../lib/api';
+
+/**
+ * Signed in: every action calls /api/v1 and applies the SERVER's response to state.
+ * Signed out: seed data in memory only ("Demo data — not saved"); nothing touches the server.
+ * Errors from signed-in actions land in `syncError` (rendered as a toast by the page).
+ */
+
+type NewTransaction = Omit<Transaction, 'id' | 'userId' | 'postedAt'>;
+
+export interface ImportCommitResult {
+  batchId: string;
+  inserted: number;
+  duplicates: number;
+  rejected: number;
+}
+
+interface Bootstrap {
+  preferences: Partial<UserPreferences>;
+  accounts: FinancialAccount[];
+  transactions: Transaction[];
+  budgets: BudgetCategory[];
+  goals: SavingsGoal[];
+  bills: BillSubscription[];
+  debts: DebtAccount[];
+  auditLogs: AuditEvent[];
+}
 
 interface FinanceContextType {
   accounts: FinancialAccount[];
@@ -35,282 +60,425 @@ interface FinanceContextType {
   preferences: UserPreferences;
   auditLogs: AuditEvent[];
   copilotHistory: CopilotMessage[];
-  
+  isReady: boolean;
+  syncError: string | null;
+  clearSyncError: () => void;
+
   // Actions
-  addTransaction: (tx: Omit<Transaction, 'id' | 'userId' | 'postedAt'>) => void;
-  updateTransaction: (id: string, updates: Partial<Transaction>) => void;
-  deleteTransaction: (id: string) => void;
-  addAccount: (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => void;
-  addBudget: (bgt: Omit<BudgetCategory, 'id'>) => void;
-  updateBudget: (id: string, updates: Partial<BudgetCategory>) => void;
-  addGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => void;
-  updateGoal: (id: string, updates: Partial<SavingsGoal>) => void;
-  addBill: (bill: Omit<BillSubscription, 'id' | 'userId'>) => void;
-  addDebt: (debt: Omit<DebtAccount, 'id' | 'userId'>) => void;
-  updateDebt: (id: string, updates: Partial<DebtAccount>) => void;
-  commitImportedTransactions: (newTxs: Omit<Transaction, 'id' | 'userId' | 'postedAt'>[]) => void;
-  rollbackImportBatch: (importTimestampPrefix: string) => void;
+  addTransaction: (tx: NewTransaction) => Promise<void>;
+  updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
+  addAccount: (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => Promise<void>;
+  addBudget: (bgt: Omit<BudgetCategory, 'id'>) => Promise<void>;
+  updateBudget: (id: string, updates: Partial<BudgetCategory>) => Promise<void>;
+  addGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => Promise<void>;
+  updateGoal: (id: string, updates: Partial<SavingsGoal>) => Promise<void>;
+  addBill: (bill: Omit<BillSubscription, 'id' | 'userId'>) => Promise<void>;
+  addDebt: (debt: Omit<DebtAccount, 'id' | 'userId'>) => Promise<void>;
+  updateDebt: (id: string, updates: Partial<DebtAccount>) => Promise<void>;
+  commitImportedTransactions: (newTxs: NewTransaction[]) => Promise<ImportCommitResult | null>;
+  rollbackImportBatch: (batchId: string) => Promise<boolean>;
   setPreferences: (prefs: Partial<UserPreferences>) => void;
   resetToDemoData: () => void;
-  clearAllUserData: () => void;
+  clearAllUserData: (password?: string) => Promise<boolean>;
   addCopilotMessage: (msg: CopilotMessage) => void;
   clearCopilotHistory: () => void;
-  login: (name: string, email: string) => void;
-  signup: (name: string, email: string) => void;
-  logout: () => void;
-  deleteAccount: () => Promise<{ success: boolean; message?: string }>;
+  login: (email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string, preferredCurrency?: string) => Promise<void>;
+  logout: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<{ success: boolean; message?: string }>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
-const STORAGE_KEY_PREFIX = 'wealthpilot_v1_';
+const welcomeMessage: CopilotMessage = {
+  id: 'init_welcome',
+  sender: 'assistant',
+  timestamp: '2026-10-16T00:00:00.000Z',
+  content: 'Welcome to WealthPilot. I am your grounded financial copilot. Ask me to summarize spending, examine dining expenses, detect potential duplicate charges, or evaluate debt payoff strategies.',
+  evidence: {
+    scope: 'Ledger Ready',
+    transactionCount: initialTransactions.length,
+    dateRange: 'Active Period',
+    confidence: 'verified_fact',
+  },
+};
+
+/** Only these keys of a partial update are sent to PATCH endpoints. */
+function pick<T extends object>(obj: Partial<T>, keys: (keyof T)[]): Partial<T> {
+  const out: Partial<T> = {};
+  for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
+  return out;
+}
+
+const UI_PREF_KEYS = ['theme', 'locale', 'dateFormat', 'reducedMotion', 'isDemoMode'] as const;
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<FinancialAccount[]>(initialAccounts);
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions);
   const [budgets, setBudgets] = useState<BudgetCategory[]>(initialBudgets);
   const [goals, setGoals] = useState<SavingsGoal[]>(initialGoals);
   const [bills, setBills] = useState<BillSubscription[]>(initialBills);
   const [debts, setDebts] = useState<DebtAccount[]>(initialDebts);
-  const [preferences, setPreferencesState] = useState<UserPreferences>(defaultPreferences);
-  const [copilotHistory, setCopilotHistory] = useState<CopilotMessage[]>([
-    {
-      id: 'init_welcome',
-      sender: 'assistant',
-      timestamp: '2026-10-16T00:00:00.000Z',
-      content: 'Welcome to WealthPilot. I am your grounded financial copilot. Ask me to summarize spending, examine dining expenses, detect potential duplicate charges, or evaluate debt payoff strategies.',
-      evidence: {
-        scope: 'Ledger Ready',
-        transactionCount: initialTransactions.length,
-        dateRange: 'Active Period',
-        confidence: 'verified_fact',
-      },
-    },
-  ]);
+  const [preferences, setPreferencesState] = useState<UserPreferences>({ ...defaultPreferences, isAuthenticated: false });
+  const [copilotHistory, setCopilotHistory] = useState<CopilotMessage[]>([welcomeMessage]);
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
 
-  // Load from local storage on client mount
-  useEffect(() => {
-    try {
-      const savedAccounts = localStorage.getItem(`${STORAGE_KEY_PREFIX}accounts`);
-      const savedTxs = localStorage.getItem(`${STORAGE_KEY_PREFIX}transactions`);
-      const savedBudgets = localStorage.getItem(`${STORAGE_KEY_PREFIX}budgets`);
-      const savedGoals = localStorage.getItem(`${STORAGE_KEY_PREFIX}goals`);
-      const savedBills = localStorage.getItem(`${STORAGE_KEY_PREFIX}bills`);
-      const savedDebts = localStorage.getItem(`${STORAGE_KEY_PREFIX}debts`);
-      const savedPrefs = localStorage.getItem(`${STORAGE_KEY_PREFIX}prefs`);
+  const isAuthed = preferences.isAuthenticated === true;
+  const pendingPrefs = useRef<Record<string, unknown>>({});
+  const prefsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-      if (savedAccounts) setAccounts(JSON.parse(savedAccounts));
-      if (savedTxs) setTransactions(JSON.parse(savedTxs));
-      if (savedBudgets) setBudgets(JSON.parse(savedBudgets));
-      if (savedGoals) setGoals(JSON.parse(savedGoals));
-      if (savedBills) setBills(JSON.parse(savedBills));
-      if (savedDebts) setDebts(JSON.parse(savedDebts));
-      if (savedPrefs) {
-        const parsed = JSON.parse(savedPrefs);
-        setPreferencesState({
-          ...defaultPreferences,
-          ...parsed,
-          userName: parsed.userName ?? defaultPreferences.userName,
-        });
-      }
-    } catch (e) {
-      console.warn('Using initial seed data', e);
-    } finally {
-      setIsLoaded(true);
-    }
+  const applyBootstrap = (data: Bootstrap) => {
+    setAccounts(data.accounts);
+    setTransactions(data.transactions);
+    setBudgets(data.budgets);
+    setGoals(data.goals);
+    setBills(data.bills);
+    setDebts(data.debts);
+    setAuditLogs(data.auditLogs);
+    setPreferencesState({ ...defaultPreferences, ...data.preferences, isAuthenticated: true });
+  };
+
+  const loadFromServer = useCallback(async () => {
+    applyBootstrap(await api.get<Bootstrap>('/bootstrap'));
   }, []);
 
-  // Save changes to local storage
-  useEffect(() => {
-    if (!isLoaded) return;
-    try {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}accounts`, JSON.stringify(accounts));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}transactions`, JSON.stringify(transactions));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}budgets`, JSON.stringify(budgets));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}goals`, JSON.stringify(goals));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}bills`, JSON.stringify(bills));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}debts`, JSON.stringify(debts));
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}prefs`, JSON.stringify(preferences));
-    } catch (e) {
-      console.warn('Failed to save to localStorage', e);
-    }
-  }, [accounts, transactions, budgets, goals, bills, debts, preferences, isLoaded]);
-
-  const addTransaction = (tx: Omit<Transaction, 'id' | 'userId' | 'postedAt'>) => {
-    const id = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const category = tx.category === 'General' || !tx.category
-      ? autoCategorizeMerchant(tx.merchant, preferences.autoCategorizationRules)
-      : tx.category;
-
-    const newTx: Transaction = {
-      ...tx,
-      id,
-      userId: preferences.userId,
-      postedAt: new Date().toISOString(),
-      category,
-      normalizedMerchant: tx.merchant.trim(),
-      importFingerprint: generateTransactionFingerprint(tx.financialDate, tx.merchant, tx.amountCents),
-    };
-
-    setTransactions((prev) => [newTx, ...prev]);
-
-    // Update account balance
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === tx.accountId
-          ? { ...acc, balanceCents: acc.balanceCents + tx.amountCents }
-          : acc
-      )
-    );
-
-    logAuditEvent('TRANSACTION_CREATED', 'transaction', id, `Added transaction: ${tx.merchant} (${tx.amountCents / 100})`);
-  };
-
-  const updateTransaction = (id: string, updates: Partial<Transaction>) => {
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
-    );
-    logAuditEvent('TRANSACTION_UPDATED', 'transaction', id, `Updated transaction attributes`);
-  };
-
-  const deleteTransaction = (id: string) => {
-    const target = transactions.find((t) => t.id === id);
-    if (target) {
-      // Revert account balance
-      setAccounts((prev) =>
-        prev.map((acc) =>
-          acc.id === target.accountId
-            ? { ...acc, balanceCents: acc.balanceCents - target.amountCents }
-            : acc
-        )
-      );
-    }
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    logAuditEvent('TRANSACTION_DELETED', 'transaction', id, `Deleted transaction`);
-  };
-
-  const addAccount = (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => {
-    const id = `acc_${Date.now()}`;
-    const newAcc: FinancialAccount = {
-      ...acc,
-      id,
-      userId: preferences.userId,
-      lastSyncedAt: new Date().toISOString(),
-    };
-    setAccounts((prev) => [...prev, newAcc]);
-    logAuditEvent('ACCOUNT_CREATED', 'financial_account', id, `Added ${acc.name} (${acc.type})`);
-  };
-
-  const addBudget = (bgt: Omit<BudgetCategory, 'id'>) => {
-    const id = `bgt_${Date.now()}`;
-    setBudgets((prev) => [...prev, { ...bgt, id }]);
-    logAuditEvent('BUDGET_CREATED', 'budget', id, `Created budget for ${bgt.category}`);
-  };
-
-  const updateBudget = (id: string, updates: Partial<BudgetCategory>) => {
-    setBudgets((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
-    );
-  };
-
-  const addGoal = (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => {
-    const id = `goal_${Date.now()}`;
-    setGoals((prev) => [
-      ...prev,
-      {
-        ...goal,
-        id,
-        userId: preferences.userId,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    logAuditEvent('GOAL_CREATED', 'savings_goal', id, `Created goal: ${goal.name}`);
-  };
-
-  const updateGoal = (id: string, updates: Partial<SavingsGoal>) => {
-    setGoals((prev) =>
-      prev.map((g) => (g.id === id ? { ...g, ...updates } : g))
-    );
-  };
-
-  const addBill = (bill: Omit<BillSubscription, 'id' | 'userId'>) => {
-    const id = `bill_${Date.now()}`;
-    setBills((prev) => [
-      ...prev,
-      {
-        ...bill,
-        id,
-        userId: preferences.userId,
-      },
-    ]);
-    logAuditEvent('BILL_CREATED', 'bill', id, `Created recurring bill: ${bill.name}`);
-  };
-
-  const addDebt = (debt: Omit<DebtAccount, 'id' | 'userId'>) => {
-    const id = `debt_${Date.now()}`;
-    setDebts((prev) => [
-      ...prev,
-      {
-        ...debt,
-        id,
-        userId: preferences.userId,
-      },
-    ]);
-    logAuditEvent('DEBT_CREATED', 'debt_account', id, `Created debt: ${debt.name}`);
-  };
-
-  const updateDebt = (id: string, updates: Partial<DebtAccount>) => {
-    setDebts((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, ...updates } : d))
-    );
-  };
-
-  const commitImportedTransactions = (newTxs: Omit<Transaction, 'id' | 'userId' | 'postedAt'>[]) => {
-    const timestamp = Date.now();
-    const prepared: Transaction[] = newTxs.map((t, idx) => ({
-      ...t,
-      id: `tx_import_${timestamp}_${idx}`,
-      userId: preferences.userId,
-      postedAt: new Date().toISOString(),
-      normalizedMerchant: t.merchant.trim(),
-      importFingerprint: generateTransactionFingerprint(t.financialDate, t.merchant, t.amountCents),
-    }));
-
-    setTransactions((prev) => [...prepared, ...prev]);
-    logAuditEvent('CSV_IMPORTED', 'import_batch', `batch_${timestamp}`, `Imported ${prepared.length} transactions`);
-  };
-
-  const rollbackImportBatch = (importTimestampPrefix: string) => {
-    setTransactions((prev) => prev.filter((t) => !t.id.startsWith(importTimestampPrefix)));
-    logAuditEvent('IMPORT_ROLLBACK', 'import_batch', importTimestampPrefix, `Rolled back import batch`);
-  };
-
-  const setPreferences = (prefs: Partial<UserPreferences>) => {
-    setPreferencesState((prev) => ({ ...prev, ...prefs }));
-    logAuditEvent('PREFERENCES_UPDATED', 'user_preference', preferences.userId, `Updated preferences`);
-  };
-
-  const resetToDemoData = () => {
+  const resetToSeed = () => {
     setAccounts(initialAccounts);
     setTransactions(initialTransactions);
     setBudgets(initialBudgets);
     setGoals(initialGoals);
     setBills(initialBills);
     setDebts(initialDebts);
-    setPreferencesState(defaultPreferences);
-    logAuditEvent('DEMO_RESET', 'system', 'system', 'Reset workspace to initial demo state');
+    setAuditLogs([]);
+    setCopilotHistory([welcomeMessage]);
+    setPreferencesState({ ...defaultPreferences, isAuthenticated: false });
   };
 
-  const clearAllUserData = () => {
-    setAccounts([]);
-    setTransactions([]);
-    setBudgets([]);
-    setGoals([]);
-    setBills([]);
-    setDebts([]);
-    logAuditEvent('USER_DATA_PURGED', 'system', 'system', 'Purged all local user data and ledgers');
+  // On mount: a valid session cookie loads the user's real data; otherwise stay in demo mode.
+  useEffect(() => {
+    loadFromServer()
+      .catch((e) => {
+        if (!(e instanceof ApiError && e.status === 401)) setSyncError(e instanceof Error ? e.message : 'Could not load your data.');
+      })
+      .finally(() => setIsReady(true));
+  }, [loadFromServer]);
+
+  /** Runs a server call; a 401 means the session ended, so drop back to demo mode. */
+  const run = async (fn: () => Promise<void>): Promise<boolean> => {
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) resetToSeed();
+      setSyncError(e instanceof Error ? e.message : 'Something went wrong.');
+      return false;
+    }
+  };
+
+  const replaceAccount = (acc: FinancialAccount | null) => {
+    if (acc) setAccounts((prev) => prev.map((a) => (a.id === acc.id ? acc : a)));
+  };
+
+  const addTransaction = async (tx: NewTransaction) => {
+    if (!isAuthed) {
+      const id = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const category = tx.category === 'General' || !tx.category
+        ? autoCategorizeMerchant(tx.merchant, preferences.autoCategorizationRules)
+        : tx.category;
+      setTransactions((prev) => [
+        { ...tx, id, userId: preferences.userId, postedAt: new Date().toISOString(), category, normalizedMerchant: tx.merchant.trim() },
+        ...prev,
+      ]);
+      setAccounts((prev) => prev.map((acc) => (acc.id === tx.accountId ? { ...acc, balanceCents: acc.balanceCents + tx.amountCents } : acc)));
+      return;
+    }
+    await run(async () => {
+      const res = await api.post<{ transaction: Transaction; account: FinancialAccount | null }>('/transactions', {
+        accountId: tx.accountId,
+        financialDate: tx.financialDate,
+        merchant: tx.merchant,
+        category: tx.category,
+        amountCents: tx.amountCents,
+        status: tx.status,
+        notes: tx.notes || undefined,
+        tags: tx.tags,
+        isTransfer: tx.isTransfer,
+      });
+      setTransactions((prev) => [res.transaction, ...prev]);
+      replaceAccount(res.account);
+    });
+  };
+
+  const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
+    if (!isAuthed) {
+      setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...updates } : t)));
+      return;
+    }
+    await run(async () => {
+      const body = {
+        ...pick(updates, ['financialDate', 'merchant', 'category', 'amountCents', 'status', 'notes', 'tags', 'isTransfer']),
+        ...(updates.splits && { splits: updates.splits.map((s) => ({ category: s.category, amountCents: s.amountCents, note: s.note || undefined })) }),
+      };
+      const res = await api.patch<{ transaction: Transaction; account: FinancialAccount | null }>(`/transactions/${encodeURIComponent(id)}`, body);
+      setTransactions((prev) => prev.map((t) => (t.id === id ? res.transaction : t)));
+      replaceAccount(res.account);
+    });
+  };
+
+  const deleteTransaction = async (id: string) => {
+    if (!isAuthed) {
+      const target = transactions.find((t) => t.id === id);
+      if (target) {
+        setAccounts((prev) => prev.map((acc) => (acc.id === target.accountId ? { ...acc, balanceCents: acc.balanceCents - target.amountCents } : acc)));
+      }
+      setTransactions((prev) => prev.filter((t) => t.id !== id));
+      return;
+    }
+    await run(async () => {
+      const res = await api.del<{ id: string; account: FinancialAccount | null }>(`/transactions/${encodeURIComponent(id)}`);
+      setTransactions((prev) => prev.filter((t) => t.id !== res.id));
+      replaceAccount(res.account);
+    });
+  };
+
+  const addAccount = async (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => {
+    if (!isAuthed) {
+      setAccounts((prev) => [...prev, { ...acc, id: `acc_${Date.now()}`, userId: preferences.userId, lastSyncedAt: new Date().toISOString() }]);
+      return;
+    }
+    await run(async () => {
+      const created = await api.post<FinancialAccount>('/accounts', {
+        name: acc.name,
+        institution: acc.institution,
+        type: acc.type,
+        currency: acc.currency,
+        balanceCents: acc.balanceCents,
+        accountNumberMask: acc.accountNumberMask,
+        isIncludedInNetWorth: acc.isIncludedInNetWorth,
+      });
+      setAccounts((prev) => [...prev, created]);
+    });
+  };
+
+  const addBudget = async (bgt: Omit<BudgetCategory, 'id'>) => {
+    if (!isAuthed) {
+      setBudgets((prev) => [...prev, { ...bgt, id: `bgt_${Date.now()}` }]);
+      return;
+    }
+    await run(async () => {
+      const saved = await api.put<BudgetCategory>('/budgets', {
+        category: bgt.category,
+        allocatedCents: bgt.allocatedCents,
+        rolloverEnabled: bgt.rolloverEnabled,
+        alertThresholdPercent: bgt.alertThresholdPercent,
+      });
+      setBudgets((prev) => (prev.some((b) => b.id === saved.id) ? prev.map((b) => (b.id === saved.id ? saved : b)) : [...prev, saved]));
+    });
+  };
+
+  const updateBudget = async (id: string, updates: Partial<BudgetCategory>) => {
+    if (!isAuthed) {
+      setBudgets((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates } : b)));
+      return;
+    }
+    await run(async () => {
+      const saved = await api.patch<BudgetCategory>(`/budgets/${encodeURIComponent(id)}`, pick(updates, ['allocatedCents', 'rolloverEnabled', 'alertThresholdPercent']));
+      setBudgets((prev) => prev.map((b) => (b.id === id ? saved : b)));
+    });
+  };
+
+  const addGoal = async (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => {
+    if (!isAuthed) {
+      setGoals((prev) => [...prev, { ...goal, id: `goal_${Date.now()}`, userId: preferences.userId, createdAt: new Date().toISOString() }]);
+      return;
+    }
+    await run(async () => {
+      const created = await api.post<SavingsGoal>('/goals', {
+        name: goal.name,
+        targetCents: goal.targetCents,
+        currentCents: goal.currentCents,
+        targetDate: goal.targetDate,
+        category: goal.category,
+        priority: goal.priority,
+        isPaused: goal.isPaused,
+      });
+      setGoals((prev) => [...prev, created]);
+    });
+  };
+
+  const updateGoal = async (id: string, updates: Partial<SavingsGoal>) => {
+    if (!isAuthed) {
+      setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, ...updates } : g)));
+      return;
+    }
+    await run(async () => {
+      const saved = await api.patch<SavingsGoal>(
+        `/goals/${encodeURIComponent(id)}`,
+        pick(updates, ['name', 'targetCents', 'currentCents', 'targetDate', 'category', 'priority', 'isPaused'])
+      );
+      setGoals((prev) => prev.map((g) => (g.id === id ? saved : g)));
+    });
+  };
+
+  const addBill = async (bill: Omit<BillSubscription, 'id' | 'userId'>) => {
+    if (!isAuthed) {
+      setBills((prev) => [...prev, { ...bill, id: `bill_${Date.now()}`, userId: preferences.userId }]);
+      return;
+    }
+    await run(async () => {
+      const created = await api.post<BillSubscription>('/bills', {
+        name: bill.name,
+        amountCents: bill.amountCents,
+        frequency: bill.frequency,
+        nextDueDate: bill.nextDueDate,
+        category: bill.category,
+        accountId: bill.accountId || undefined,
+        isAutoPay: bill.isAutoPay,
+        status: bill.status === 'paused' ? 'paused' : 'active',
+      });
+      setBills((prev) => [...prev, created]);
+    });
+  };
+
+  const addDebt = async (debt: Omit<DebtAccount, 'id' | 'userId'>) => {
+    if (!isAuthed) {
+      setDebts((prev) => [...prev, { ...debt, id: `debt_${Date.now()}`, userId: preferences.userId }]);
+      return;
+    }
+    await run(async () => {
+      const created = await api.post<DebtAccount>('/debts', debt);
+      setDebts((prev) => [...prev, created]);
+    });
+  };
+
+  const updateDebt = async (id: string, updates: Partial<DebtAccount>) => {
+    if (!isAuthed) {
+      setDebts((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
+      return;
+    }
+    await run(async () => {
+      const saved = await api.patch<DebtAccount>(
+        `/debts/${encodeURIComponent(id)}`,
+        pick(updates, ['name', 'balanceCents', 'aprPercent', 'minimumPaymentCents', 'dueDateDay', 'category'])
+      );
+      setDebts((prev) => prev.map((d) => (d.id === id ? saved : d)));
+    });
+  };
+
+  const commitImportedTransactions = async (newTxs: NewTransaction[]): Promise<ImportCommitResult | null> => {
+    if (!newTxs.length) return null;
+    if (!isAuthed) {
+      const batchId = `tx_import_${Date.now()}`;
+      const prepared: Transaction[] = newTxs.map((t, idx) => ({
+        ...t,
+        id: `${batchId}_${idx}`,
+        userId: preferences.userId,
+        postedAt: new Date().toISOString(),
+        normalizedMerchant: t.merchant.trim(),
+      }));
+      setTransactions((prev) => [...prepared, ...prev]);
+      return { batchId, inserted: prepared.length, duplicates: 0, rejected: 0 };
+    }
+    let result: ImportCommitResult | null = null;
+    await run(async () => {
+      const res = await api.post<{
+        batchId: string;
+        inserted: number;
+        duplicates: number;
+        rejected: { index: number; message: string }[];
+        transactions: Transaction[];
+        account: FinancialAccount | null;
+      }>('/transactions/import', {
+        accountId: newTxs[0].accountId,
+        rows: newTxs.map((t) => ({
+          financialDate: t.financialDate,
+          merchant: t.merchant,
+          amountCents: t.amountCents,
+          category: t.category,
+          notes: t.notes || undefined,
+        })),
+      });
+      setTransactions((prev) => [...res.transactions, ...prev]);
+      replaceAccount(res.account);
+      result = { batchId: res.batchId, inserted: res.inserted, duplicates: res.duplicates, rejected: res.rejected.length };
+    });
+    return result;
+  };
+
+  const rollbackImportBatch = async (batchId: string): Promise<boolean> => {
+    if (!isAuthed) {
+      setTransactions((prev) => prev.filter((t) => !t.id.startsWith(batchId)));
+      return true;
+    }
+    return run(async () => {
+      const res = await api.post<{ voidedIds: string[]; accounts: FinancialAccount[] }>(`/transactions/import/${encodeURIComponent(batchId)}/rollback`);
+      const voided = new Set(res.voidedIds);
+      setTransactions((prev) => prev.filter((t) => !voided.has(t.id)));
+      setAccounts(res.accounts);
+    });
+  };
+
+  const flushPreferences = () => {
+    const body = pendingPrefs.current;
+    pendingPrefs.current = {};
+    if (Object.keys(body).length) void run(async () => void (await api.patch('/user/preferences', body)));
+  };
+
+  const setPreferences = (prefs: Partial<UserPreferences>) => {
+    setPreferencesState((prev) => ({ ...prev, ...prefs }));
+    if (!isAuthed) return;
+
+    // AI is opt-in and has its own consent endpoint (never part of the preferences PATCH).
+    if (prefs.isAiEnabled !== undefined) {
+      void run(async () => {
+        if (prefs.isAiEnabled) await api.post('/user/ai-consent', { providers: ['groq'] });
+        else await api.del('/user/ai-consent');
+      });
+    }
+
+    const p = pendingPrefs.current;
+    if (prefs.userName !== undefined && prefs.userName.trim()) p.name = prefs.userName.trim();
+    if (prefs.baseCurrency !== undefined) p.preferredCurrency = prefs.baseCurrency;
+    if (prefs.timezone !== undefined) p.timezone = prefs.timezone;
+    if (prefs.autoCategorizationRules !== undefined) {
+      p.categorizationRules = prefs.autoCategorizationRules.map((r) => ({ keyword: r.keyword, category: r.category }));
+    }
+    const ui = pick(prefs, [...UI_PREF_KEYS]);
+    if (Object.keys(ui).length) p.uiPrefs = { ...(p.uiPrefs as object), ...ui };
+
+    // Debounced so typing a name doesn't send one request per keystroke.
+    if (prefsTimer.current) clearTimeout(prefsTimer.current);
+    prefsTimer.current = setTimeout(flushPreferences, 600);
+  };
+
+  const resetToDemoData = () => {
+    if (isAuthed) {
+      setSyncError('Demo reset is only available when signed out.');
+      return;
+    }
+    resetToSeed();
+  };
+
+  const clearAllUserData = async (password?: string): Promise<boolean> => {
+    if (!isAuthed) {
+      setAccounts([]);
+      setTransactions([]);
+      setBudgets([]);
+      setGoals([]);
+      setBills([]);
+      setDebts([]);
+      return true;
+    }
+    let cleared = false;
+    await run(async () => {
+      await api.del('/user/data', { password: password ?? '' });
+      await loadFromServer();
+      cleared = true;
+    });
+    return cleared;
   };
 
   const addCopilotMessage = (msg: CopilotMessage) => {
@@ -319,72 +487,33 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   const clearCopilotHistory = () => {
     setCopilotHistory([]);
-    logAuditEvent('COPILOT_HISTORY_CLEARED', 'ai_copilot', 'history', 'Cleared copilot chat history');
   };
 
-  const login = (name: string, email: string) => {
-    const finalName = name.trim() || preferences.userName || 'Aseer';
-    const finalEmail = email.trim() || preferences.userEmail || 'pilot@wealthpilot.app';
-    setPreferencesState((prev) => ({
-      ...prev,
-      userName: finalName,
-      userEmail: finalEmail,
-      isAuthenticated: true,
-    }));
-    logAuditEvent('USER_LOGIN', 'auth', preferences.userId, `User ${finalName} logged in`);
+  // login/signup throw ApiError so the auth modal can show the message.
+  const login = async (email: string, password: string) => {
+    await api.post('/auth/login', { email, password });
+    await loadFromServer();
   };
 
-  const signup = (name: string, email: string) => {
-    const finalName = name.trim() || 'Pilot';
-    const finalEmail = email.trim() || 'pilot@wealthpilot.app';
-    setPreferencesState((prev) => ({
-      ...prev,
-      userName: finalName,
-      userEmail: finalEmail,
-      isAuthenticated: true,
-    }));
-    logAuditEvent('USER_SIGNUP', 'auth', preferences.userId, `New account initialized for ${finalName}`);
+  const signup = async (name: string, email: string, password: string, preferredCurrency = 'USD') => {
+    await api.post('/auth/signup', { name, email, password, preferredCurrency });
+    await loadFromServer();
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await api.post('/auth/logout').catch(() => null); // the cookie is cleared server-side; local state resets regardless
+    resetToSeed();
+  };
+
+  const deleteAccount = async (password: string): Promise<{ success: boolean; message?: string }> => {
+    if (!isAuthed) return { success: false, message: 'Sign in to delete your account.' };
     try {
-      fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => null);
-    } catch {
-      // offline/local
+      const res = await api.del<{ message: string }>('/auth/account', { password });
+      resetToSeed();
+      return { success: true, message: res.message };
+    } catch (e) {
+      return { success: false, message: e instanceof Error ? e.message : 'Account deletion failed.' };
     }
-    setPreferencesState((prev) => ({
-      ...prev,
-      isAuthenticated: false,
-    }));
-    logAuditEvent('USER_LOGOUT', 'auth', preferences.userId, 'User session logged out');
-  };
-
-  const deleteAccount = async (): Promise<{ success: boolean; message?: string }> => {
-    let message = '';
-    try {
-      const res = await fetch('/api/v1/auth/account', { method: 'DELETE' });
-      const data = await res.json();
-      if (data.message) message = data.message;
-    } catch {
-      // local fallback
-    }
-
-    clearAllUserData();
-    setPreferencesState({
-      ...defaultPreferences,
-      userName: 'Pilot',
-      userEmail: 'pilot@wealthpilot.app',
-      isAuthenticated: false,
-    });
-
-    try {
-      localStorage.clear();
-    } catch {
-      // ignore
-    }
-
-    logAuditEvent('USER_ACCOUNT_DELETED', 'auth', preferences.userId, 'Account and all financial entities eradicated (GDPR Art. 17)');
-    return { success: true, message: message || 'Account permanently deleted under GDPR Article 17.' };
   };
 
   return (
@@ -399,6 +528,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         preferences,
         auditLogs,
         copilotHistory,
+        isReady,
+        syncError,
+        clearSyncError: () => setSyncError(null),
         addTransaction,
         updateTransaction,
         deleteTransaction,

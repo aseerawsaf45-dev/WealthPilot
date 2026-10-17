@@ -58,6 +58,10 @@ const secretPatterns = [
   { name: 'Private Key PEM header', regex: /-----BEGIN PRIVATE KEY-----/g }
 ];
 
+// SEC-01: a literal fallback for a secret-named env var means anyone reading the repo has the secret.
+const secretFallbackRegex = /process\.env\.[A-Z0-9_]*(SECRET|KEY|PEPPER|PASSWORD|TOKEN)[A-Z0-9_]*\s*(\|\||\?\?)\s*['"`]/g;
+// Plan §4.1: domain routes go through src/server/repos (always userId-scoped), never Prisma directly.
+const apiV1Dir = path.join(SRC_DIR, 'app', 'api', 'v1');
 for (const file of sourceFiles) {
   const content = fs.readFileSync(file, 'utf8');
   for (const pattern of secretPatterns) {
@@ -65,6 +69,16 @@ for (const file of sourceFiles) {
       console.error(`   ❌ [CRITICAL SECRET LEAK] Found potential ${pattern.name} in: ${path.relative(SRC_DIR, file)}`);
       totalErrors++;
     }
+  }
+  if (secretFallbackRegex.test(content)) {
+    console.error(`   ❌ [SECRET FALLBACK] Hardcoded fallback for a secret env var in: ${path.relative(SRC_DIR, file)}`);
+    totalErrors++;
+  }
+  secretFallbackRegex.lastIndex = 0;
+  const rel = path.relative(apiV1Dir, file);
+  if (!rel.startsWith('..') && !rel.startsWith('auth') && /\bprisma\./.test(content)) {
+    console.error(`   ❌ [TENANT SCOPING] Route calls Prisma directly (use src/server/repos/*): ${path.relative(SRC_DIR, file)}`);
+    totalErrors++;
   }
 }
 if (totalErrors === 0) {

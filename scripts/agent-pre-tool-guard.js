@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
  * WealthPilot — Agent Lifecycle Hook: PreToolUse Safety Guard
- * 
- * Intercepts tool executions (commands) to block catastrophic actions:
+ *
+ * Shared by Antigravity (.agents/hooks.json) and Claude Code (.claude/settings.json).
+ * Blocks catastrophic shell commands:
  * - Accidental database drops or irreversible deletions
- * - Secrets exfiltration or hardcoded keys
+ * - Dumping real secrets from .env into the agent transcript
  */
 
 function readStdin() {
@@ -25,36 +26,34 @@ function readStdin() {
   });
 }
 
+const BLOCKED = [
+  [/drop\s+(database|schema|table)/, 'Destructive database drop command blocked to prevent irreversible loss of ledger records.'],
+  [/prisma\s+migrate\s+reset|--force-reset|--accept-data-loss/, 'Prisma command that wipes data blocked. Test destructive migrations on a Neon branch instead.'],
+  [/rm\s+-rf\s+(\/|~|\.)(\s|$)/, 'Recursive delete of a root/home/project directory blocked.'],
+  [/(cat|type|get-content|more|less|head|tail)\s+["']?[^\s"']*\.env(\.local)?["']?(\s|$)/, 'Reading .env would copy real secrets into the agent transcript. Use .env.example for key names.'],
+];
+
 async function main() {
   const context = await readStdin();
-  const toolCall = context.toolCall || {};
-  const args = toolCall.args || {};
-  const command = (args.CommandLine || '').toLowerCase();
+  // Claude Code sends tool_input.command; Antigravity sends toolCall.args.CommandLine.
+  const isClaude = Boolean(context.tool_input);
+  const command = String(
+    (isClaude ? context.tool_input.command : (context.toolCall || {}).args?.CommandLine) || ''
+  ).toLowerCase();
 
-  // Block destructive database eradication commands
-  if (
-    command.includes('drop database') ||
-    command.includes('drop schema') ||
-    command.includes('prisma migrate reset') ||
-    command.includes('rm -rf /')
-  ) {
-    const output = {
-      decision: 'deny',
-      reason: 'FinTech Compliance Safety Guard: Destructive database drop command blocked to prevent irreversible loss of ledger records.',
-    };
-    process.stdout.write(JSON.stringify(output));
+  const hit = BLOCKED.find(([pattern]) => pattern.test(command));
+  if (!hit) {
+    // Claude Code: no output = normal permission flow. Antigravity expects an explicit allow.
+    if (!isClaude) process.stdout.write(JSON.stringify({ decision: 'allow' }));
     process.exit(0);
   }
 
-  // Allow standard commands
-  const output = {
-    decision: 'allow',
-  };
+  const reason = `FinTech Compliance Safety Guard: ${hit[1]}`;
+  const output = isClaude
+    ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }
+    : { decision: 'deny', reason };
   process.stdout.write(JSON.stringify(output));
   process.exit(0);
 }
 
-main().catch(() => {
-  process.stdout.write(JSON.stringify({ decision: 'allow' }));
-  process.exit(0);
-});
+main().catch(() => process.exit(0));

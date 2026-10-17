@@ -36,6 +36,7 @@ export function ImportTab() {
   } | null>(null);
 
   const [lastBatchId, setLastBatchId] = useState<string | null>(null);
+  const [commitSummary, setCommitSummary] = useState<string | null>(null);
 
   const sampleCsvData = `Date,Description,Amount,Category
 2026-10-10,Starbucks Coffee,-5.75,Dining
@@ -80,7 +81,7 @@ export function ImportTab() {
     setStep(3);
   };
 
-  const handleCommit = () => {
+  const handleCommit = async () => {
     if (!processedResult) return;
 
     const toCommit = processedResult.validRows.map((r) => ({
@@ -98,8 +99,15 @@ export function ImportTab() {
       source: 'csv_import' as const,
     }));
 
-    commitImportedTransactions(toCommit);
-    setLastBatchId(`tx_import_${Date.now()}`);
+    const result = await commitImportedTransactions(toCommit);
+    if (!result) return; // the error is shown by the page-level toast
+    setLastBatchId(result.batchId); // the server's batch id, so rollback targets exactly these rows
+    setCommitSummary(
+      `${result.inserted} added` +
+        (result.duplicates ? `, ${result.duplicates} skipped as duplicates` : '') +
+        (result.rejected ? `, ${result.rejected} rejected` : '') +
+        '.'
+    );
     setStep(4);
   };
 
@@ -355,6 +363,7 @@ export function ImportTab() {
             <h3 className="text-lg font-bold text-[#0F172A]">Import Successfully Committed</h3>
             <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">
               Your transactions have been added to the primary ledger and balances updated automatically.
+              {commitSummary && <span className="block mt-1 font-semibold text-slate-800">{commitSummary}</span>}
             </p>
           </div>
 
@@ -367,10 +376,12 @@ export function ImportTab() {
             </button>
             {lastBatchId && (
               <button
-                onClick={() => {
-                  rollbackImportBatch(lastBatchId);
-                  alert('Import batch has been safely rolled back.');
-                  setStep(1);
+                onClick={async () => {
+                  if (await rollbackImportBatch(lastBatchId)) {
+                    alert('Import batch has been safely rolled back.');
+                    setLastBatchId(null);
+                    setStep(1);
+                  }
                 }}
                 className="px-5 py-2.5 rounded-full bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
               >

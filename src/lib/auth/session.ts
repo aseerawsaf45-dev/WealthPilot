@@ -1,84 +1,57 @@
 /**
  * WealthPilot — Cryptographic Session Token & Cookie Enclave
- * 
- * Provides stateless, tamper-evident HMAC-SHA256 session tokens with
- * zero external dependencies, compliant with RFC 7519 and OWASP Session Management.
+ *
+ * HMAC-SHA256 signed tokens (JWT-shaped). The token only identifies a server-side
+ * `Session` row (sid) and its user; everything else (privacy flags, profile) is read
+ * from the database on each request so revocation and AI kill switches apply at once.
+ * Cookie-only: tokens are never returned in JSON bodies or accepted as Bearer headers.
  */
 
 import crypto from 'crypto';
 
 export interface SessionPayload {
+  sid: string;
   userId: string;
-  email: string;
-  name?: string;
-  preferredCurrency?: string;
-  isAiEnabled?: boolean;
   exp: number; // Unix timestamp in seconds
   iat: number; // Issued at
 }
 
 const SESSION_COOKIE_NAME = 'wealthpilot_session';
-const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.NEON_AUTH_COOKIE_SECRET || 'wealthpilot-audit-standard-secret-key-2026-fintech';
+export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
-function base64UrlEncode(str: string): string {
-  return Buffer.from(str)
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
+// Read lazily so importing this module (tests, build) doesn't need the secret; any sign/verify does.
+function getSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret || Buffer.byteLength(secret) < 32) {
+    throw new Error('SESSION_SECRET must be set to at least 32 bytes (see BACKEND_AND_AI_PLAN.md M3).');
+  }
+  return secret;
 }
 
-function base64UrlDecode(str: string): string {
-  let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (base64.length % 4) {
-    base64 += '=';
-  }
-  return Buffer.from(base64, 'base64').toString('utf8');
+function base64UrlEncode(str: string): string {
+  return Buffer.from(str).toString('base64url');
+}
+
+function sign(data: string): string {
+  return crypto.createHmac('sha256', getSecret()).update(data).digest('base64url');
 }
 
 /**
- * Creates a signed JWT-compatible session token.
+ * Creates a signed session token for an existing `Session` row.
  */
 export function createSessionToken(
-  user: {
-    id: string;
-    email: string;
-    name?: string | null;
-    preferredCurrency?: string;
-    isAiEnabled?: boolean;
-  },
+  session: { sid: string; userId: string },
   maxAgeSeconds = SESSION_MAX_AGE_SECONDS
 ): string {
   const now = Math.floor(Date.now() / 1000);
-  const header = JSON.stringify({ alg: 'HS256', typ: 'JWT' });
-  const payload: SessionPayload = {
-    userId: user.id,
-    email: user.email,
-    name: user.name || undefined,
-    preferredCurrency: user.preferredCurrency || 'USD',
-    isAiEnabled: user.isAiEnabled ?? true,
-    iat: now,
-    exp: now + maxAgeSeconds,
-  };
-
-  const encodedHeader = base64UrlEncode(header);
-  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-  const data = `${encodedHeader}.${encodedPayload}`;
-
-  const signature = crypto
-    .createHmac('sha256', SESSION_SECRET)
-    .update(data)
-    .digest('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  return `${data}.${signature}`;
+  const payload: SessionPayload = { sid: session.sid, userId: session.userId, iat: now, exp: now + maxAgeSeconds };
+  const data = `${base64UrlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${base64UrlEncode(JSON.stringify(payload))}`;
+  return `${data}.${sign(data)}`;
 }
 
 /**
- * Verifies and decodes a session token. Returns null if invalid or expired.
+ * Verifies signature (constant-time) and expiry. Returns null if invalid or expired.
+ * Does NOT check revocation; `requireSession` in src/server/http.ts does that against the DB.
  */
 export function verifySessionToken(token: string): SessionPayload | null {
   if (!token || typeof token !== 'string') return null;
@@ -87,28 +60,17 @@ export function verifySessionToken(token: string): SessionPayload | null {
   if (parts.length !== 3) return null;
 
   const [encodedHeader, encodedPayload, signature] = parts;
-  const data = `${encodedHeader}.${encodedPayload}`;
-
-  const expectedSignature = crypto
-    .createHmac('sha256', SESSION_SECRET)
-    .update(data)
-    .digest('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  if (signature !== expectedSignature) {
+  const expected = Buffer.from(sign(`${encodedHeader}.${encodedPayload}`));
+  const given = Buffer.from(signature);
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
     return null; // Tampering detected
   }
 
   try {
-    const payload = JSON.parse(base64UrlDecode(encodedPayload)) as SessionPayload;
-    const now = Math.floor(Date.now() / 1000);
-
-    if (payload.exp && payload.exp < now) {
-      return null; // Token expired
+    const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')) as SessionPayload;
+    if (!payload.sid || !payload.userId || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
+      return null;
     }
-
     return payload;
   } catch {
     return null;
@@ -124,34 +86,22 @@ export function parseCookieHeader(cookieHeader: string | null): Record<string, s
   for (const pair of cookieHeader.split(';')) {
     const [name, ...rest] = pair.trim().split('=');
     if (name && rest.length > 0) {
-      cookies[name.trim()] = decodeURIComponent(rest.join('='));
+      try {
+        cookies[name.trim()] = decodeURIComponent(rest.join('='));
+      } catch {
+        // malformed cookie value; ignore it
+      }
     }
   }
   return cookies;
 }
 
 /**
- * Extracts and verifies session payload from an incoming Request.
+ * Extracts and verifies the session token from the request's cookie (cookie only).
  */
 export function getSessionFromRequest(request: Request): SessionPayload | null {
-  // 1. Check Cookie header
-  const cookieHeader = request.headers.get('cookie');
-  const cookies = parseCookieHeader(cookieHeader);
-  const cookieToken = cookies[SESSION_COOKIE_NAME];
-  if (cookieToken) {
-    const session = verifySessionToken(cookieToken);
-    if (session) return session;
-  }
-
-  // 2. Fallback to Authorization: Bearer <token>
-  const authHeader = request.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const bearerToken = authHeader.substring(7).trim();
-    const session = verifySessionToken(bearerToken);
-    if (session) return session;
-  }
-
-  return null;
+  const token = parseCookieHeader(request.headers.get('cookie'))[SESSION_COOKIE_NAME];
+  return token ? verifySessionToken(token) : null;
 }
 
 /**

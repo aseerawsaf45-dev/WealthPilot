@@ -1,130 +1,49 @@
 /**
- * WealthPilot — User Authentication API (Sign In)
- * 
- * Standards:
- * - Constant-time bcrypt comparison
- * - Tamper-evident session cookie issuance
- * - SOX Section 302 access logging
+ * WealthPilot — Sign in. POST /api/v1/auth/login
+ *
+ * Same response and timing for unknown email vs wrong password; two rate-limit buckets
+ * (per IP, per email); server-side Session row; cookie only (no token in the body).
  */
 
-import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/server/db';
-import { comparePassword } from '@/lib/auth/password';
-import { createSessionToken, buildSessionCookieHeader } from '@/lib/auth/session';
+import { handle, parseBody, ok, fail, clientIp, startSession } from '@/server/http';
+import { rateLimit } from '@/server/rateLimit';
+import { audit } from '@/server/audit';
+import { comparePassword, burnPasswordCompare, needsRehash, hashPassword } from '@/lib/auth/password';
 
-const loginSchema = z.object({
-  email: z.string().min(1, 'Email or username is required'),
-  password: z.string().min(1, 'Password is required'),
+const LoginBody = z.object({
+  email: z.string().trim().min(1).max(254),
+  password: z.string().min(1).max(128),
 });
 
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const parsed = loginSchema.safeParse(body);
+const INVALID = 'Invalid email or password.';
 
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Validation failed',
-          issues: parsed.error.issues.map((i) => i.message),
-        },
-        { status: 400 }
-      );
-    }
+export const POST = handle(async (request) => {
+  const { email: rawEmail, password } = await parseBody(request, LoginBody);
+  const email = rawEmail.toLowerCase();
 
-    const { email: rawEmail, password } = parsed.data;
-    const email = rawEmail.trim().toLowerCase();
+  await rateLimit('login:ip', [clientIp(request)], 20, 15 * 60);
+  await rateLimit('login:email', [email], 10, 60 * 60);
 
-    // Query user by email
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: {
-        accounts: {
-          select: {
-            id: true,
-            name: true,
-            balanceCents: true,
-            type: true,
-            currency: true,
-          },
-        },
-      },
-    });
-
-    if (!user || !user.passwordHash) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid email or password' },
-        { status: 401 }
-      );
-    }
-
-    const isMatch = await comparePassword(password, user.passwordHash);
-    if (!isMatch) {
-      // Record failed login audit event with SOX checksum
-      const failAudit = `SOX_FAIL_${user.id}_${Date.now()}`;
-      await prisma.auditEvent.create({
-        data: {
-          userId: user.id,
-          eventType: 'USER_LOGIN_FAILURE',
-          actor: 'USER',
-          details: `Failed authentication attempt for ${email}`,
-          checksumAfter: failAudit,
-        },
-      });
-
-      return NextResponse.json(
-        { success: false, error: 'Invalid email or password' },
-        { status: 401 }
-      );
-    }
-
-    // Record successful login audit event with SOX checksum
-    const successAudit = `SOX_SUCCESS_${user.id}_${Date.now()}`;
-    await prisma.auditEvent.create({
-      data: {
-        userId: user.id,
-        eventType: 'USER_LOGIN_SUCCESS',
-        actor: 'USER',
-        details: `Successful authentication for ${email}`,
-        checksumAfter: successAudit,
-      },
-    });
-
-    // Create session token
-    const token = createSessionToken({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      preferredCurrency: user.preferredCurrency,
-      isAiEnabled: user.isAiEnabled,
-    });
-
-    const response = NextResponse.json(
-      {
-        success: true,
-        message: 'Authentication successful',
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          preferredCurrency: user.preferredCurrency,
-          isAiEnabled: user.isAiEnabled,
-          accountCount: user.accounts.length,
-        },
-        token,
-      },
-      { status: 200 }
-    );
-
-    response.headers.set('Set-Cookie', buildSessionCookieHeader(token));
-    return response;
-  } catch (error: unknown) {
-    const errMessage = error instanceof Error ? error.message : 'Authentication failed';
-    return NextResponse.json(
-      { success: false, error: errMessage },
-      { status: 500 }
-    );
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, email: true, passwordHash: true } });
+  if (!user?.passwordHash) {
+    await burnPasswordCompare(password);
+    return fail('UNAUTHORIZED', INVALID, 401);
   }
-}
+
+  if (!(await comparePassword(password, user.passwordHash))) {
+    await audit(user.id, 'USER_LOGIN_FAILURE', 'wrong password');
+    return fail('UNAUTHORIZED', INVALID, 401);
+  }
+
+  if (needsRehash(user.passwordHash)) {
+    const passwordHash = await hashPassword(password).catch(() => null); // legacy short passwords keep their hash
+    if (passwordHash) await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  }
+
+  await audit(user.id, 'USER_LOGIN_SUCCESS', 'session started');
+  const response = ok({ user: { id: user.id, name: user.name, email: user.email } });
+  response.headers.set('Set-Cookie', await startSession(user.id));
+  return response;
+});

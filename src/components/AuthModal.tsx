@@ -80,6 +80,16 @@ export function AuthModal({
     setStatusMessage('Filled verified competition account: aseer@wealthpilot.app');
   };
 
+  const finishSuccess = (message: string) => {
+    setIsSuccess(true);
+    setStatusMessage(message);
+    setTimeout(() => {
+      setIsLoading(false);
+      if (onSuccess) onSuccess();
+      onClose();
+    }, 700);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -87,117 +97,41 @@ export function AuthModal({
     setErrorMessage(null);
 
     const targetEmail = email.trim().toLowerCase();
-    const targetPassword = password;
 
     try {
       if (mode === 'signup') {
         const targetName = name.trim() || 'Pilot';
-        const res = await fetch('/api/v1/auth/signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: targetName,
-            email: targetEmail,
-            password: targetPassword,
-            preferredCurrency: preferences.baseCurrency === 'BDT' ? 'BDT' : 'USD',
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Failed to create account');
-        }
-
-        signup(data.user?.name || targetName, data.user?.email || targetEmail);
-        setIsSuccess(true);
-        setStatusMessage(`Welcome aboard, ${data.user?.name || targetName}! Ledger enclave initialized.`);
+        await signup(targetName, targetEmail, password, preferences.baseCurrency === 'BDT' ? 'BDT' : 'USD');
+        finishSuccess(`Welcome aboard, ${targetName}! Your ledger is saved to your account.`);
       } else {
-        const res = await fetch('/api/v1/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: targetEmail,
-            password: targetPassword,
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Invalid credentials');
-        }
-
-        login(data.user?.name || 'Aseer', data.user?.email || targetEmail);
-        setIsSuccess(true);
-        setStatusMessage(`Welcome back, ${data.user?.name || 'Aseer'}! Authenticated to Neon PostgreSQL.`);
+        await login(targetEmail, password);
+        finishSuccess('Welcome back! Your data is loaded from your account.');
       }
-
-      setTimeout(() => {
-        setIsLoading(false);
-        if (onSuccess) onSuccess();
-        onClose();
-      }, 700);
     } catch (err: unknown) {
       setIsLoading(false);
-      const msg = err instanceof Error ? err.message : 'Authentication failed';
-      setErrorMessage(msg);
+      setErrorMessage(err instanceof Error ? err.message : 'Authentication failed');
     }
   };
 
   const handleInstantDemoLogin = async () => {
     setIsLoading(true);
-    setStatusMessage('Authenticating competition demo profile...');
+    setStatusMessage('Signing in to the competition demo account...');
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: 'aseer@wealthpilot.app',
-          password: 'admin123',
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Demo login failed');
-      }
-
-      login(data.user?.name || 'Aseer', 'aseer@wealthpilot.app');
-      setIsSuccess(true);
-      setStatusMessage('Demo profile verified. Entering live workspace...');
-      setTimeout(() => {
-        setIsLoading(false);
-        if (onSuccess) onSuccess();
-        onClose();
-      }, 600);
-    } catch {
-      // Fallback to local session
-      login('Aseer', 'aseer@wealthpilot.app');
-      setIsSuccess(true);
-      setStatusMessage('Demo profile loaded into local ledger.');
-      setTimeout(() => {
-        setIsLoading(false);
-        if (onSuccess) onSuccess();
-        onClose();
-      }, 600);
+      await login('aseer@wealthpilot.app', 'admin123');
+      finishSuccess('Demo account signed in. Entering live workspace...');
+    } catch (err: unknown) {
+      setIsLoading(false);
+      setStatusMessage(null);
+      setErrorMessage(err instanceof Error ? err.message : 'Demo sign-in failed');
     }
   };
 
   const handlePasskeySimulation = () => {
-    setIsLoading(true);
-    setStatusMessage('Querying local hardware WebAuthn enclave...');
-    setErrorMessage(null);
-    setTimeout(() => {
-      login(preferences.userName || 'Aseer', preferences.userEmail || 'aseer@wealthpilot.app');
-      setIsSuccess(true);
-      setStatusMessage('Biometric signature verified.');
-      setTimeout(() => {
-        setIsLoading(false);
-        if (onSuccess) onSuccess();
-        onClose();
-      }, 600);
-    }, 600);
+    // Passkeys aren't implemented server-side; don't pretend to authenticate.
+    setStatusMessage(null);
+    setErrorMessage('Passkey sign-in isn’t available yet. Please use email and password.');
   };
 
   return (

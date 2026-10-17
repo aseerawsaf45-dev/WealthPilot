@@ -17,7 +17,8 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test:integration": "tsx --env-file=.env --test scripts/integration.mts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -25,7 +26,6 @@
   "dependencies": {
     "@neon/config": "^1.9.2",
     "@neon/env": "^1.6.3",
-    "@neondatabase/auth": "^0.6.0-beta",
     "@prisma/client": "6.19.3",
     "@tailwindcss/postcss": "^4.3.3",
     "bcryptjs": "^3.0.3",

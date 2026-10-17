@@ -38,6 +38,8 @@ export function SettingsTab() {
   } = useFinance();
 
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
@@ -87,10 +89,19 @@ export function SettingsTab() {
   // Handle Delete All Data & Account (GDPR Art. 17)
   const handleConfirmDelete = async () => {
     if (deleteConfirmationInput === 'DELETE ALL DATA' || deleteConfirmationInput === 'DELETE ACCOUNT') {
-      const res = await deleteAccount();
+      // Signed out there is no account, only in-memory demo data to clear.
+      const res = preferences.isAuthenticated
+        ? await deleteAccount(deletePassword)
+        : { success: await clearAllUserData(), message: 'Demo data cleared from this browser tab.' };
+      if (!res.success) {
+        setDeleteError(res.message || 'Account deletion failed.');
+        return;
+      }
       setIsDeleteModalOpen(false);
       setDeleteConfirmationInput('');
-      setExportNotice(res.message || 'Account and all financial records have been permanently eradicated (GDPR Article 17).');
+      setDeletePassword('');
+      setDeleteError(null);
+      setExportNotice(res.message || 'Account and all financial records have been permanently deleted (GDPR Article 17).');
       setTimeout(() => setExportNotice(null), 6000);
     }
   };
@@ -303,6 +314,7 @@ export function SettingsTab() {
             </div>
           </div>
 
+          {!preferences.isAuthenticated && (
           <div className="pt-4 border-t border-black/[0.05] mt-6">
             <button
               onClick={resetToDemoData}
@@ -312,6 +324,7 @@ export function SettingsTab() {
               <span>Reset to Clean Seed Dataset</span>
             </button>
           </div>
+          )}
         </div>
 
         {/* Card 4: Danger Zone / Data Erasure */}
@@ -471,6 +484,8 @@ export function SettingsTab() {
                 onClick={() => {
                   setIsDeleteModalOpen(false);
                   setDeleteConfirmationInput('');
+                  setDeletePassword('');
+                  setDeleteError(null);
                 }}
                 className="p-1 rounded-lg text-neutral-400 hover:text-black"
               >
@@ -479,7 +494,9 @@ export function SettingsTab() {
             </div>
 
             <p className="text-xs text-neutral-600 mb-4 leading-relaxed">
-              This action will permanently delete all financial accounts, historical transactions, custom categories, savings targets, and audit histories from your local browser database.
+              {preferences.isAuthenticated
+                ? 'This permanently deletes your account and every financial account, transaction, budget, goal, bill, debt and audit record stored for it. This cannot be undone.'
+                : 'You are in demo mode. This clears the demo data in this browser tab; nothing is stored on the server.'}
             </p>
 
             <div className="mb-5">
@@ -493,6 +510,26 @@ export function SettingsTab() {
                 placeholder="DELETE ALL DATA"
                 className="w-full px-3 py-2 rounded-xl bg-neutral-50 border border-rose-300 text-rose-700 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-rose-500 font-bold"
               />
+              {preferences.isAuthenticated && (
+                <>
+                  <label htmlFor="delete-password" className="block text-[11px] text-neutral-600 mt-4 mb-2 font-mono font-medium">
+                    Confirm with your password:
+                  </label>
+                  <input
+                    id="delete-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-50 border border-rose-300 text-xs focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                </>
+              )}
+              {deleteError && (
+                <p role="alert" className="mt-3 text-xs text-rose-700 font-semibold">
+                  {deleteError}
+                </p>
+              )}
             </div>
 
             <div className="flex gap-3">
@@ -500,6 +537,8 @@ export function SettingsTab() {
                 onClick={() => {
                   setIsDeleteModalOpen(false);
                   setDeleteConfirmationInput('');
+                  setDeletePassword('');
+                  setDeleteError(null);
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs text-neutral-700 font-semibold transition-colors cursor-pointer"
               >
@@ -507,7 +546,7 @@ export function SettingsTab() {
               </button>
               <button
                 onClick={handleConfirmDelete}
-                disabled={deleteConfirmationInput !== 'DELETE ALL DATA'}
+                disabled={deleteConfirmationInput !== 'DELETE ALL DATA' || (preferences.isAuthenticated && !deletePassword)}
                 className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-30 disabled:cursor-not-allowed text-xs text-white font-bold transition-colors cursor-pointer shadow-md shadow-rose-600/20"
               >
                 Permanently Purge
