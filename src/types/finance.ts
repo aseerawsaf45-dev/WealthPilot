@@ -134,6 +134,8 @@ export interface UserPreferences {
   isAiEnabled: boolean;
   /** Providers the user consented to (signed in); Gemini needs an allowed region. */
   aiProviders?: string[];
+  /** Signed in: save assistant chats to the history sidebar across devices (off by default). */
+  chatHistoryEnabled?: boolean;
   /** ISO-3166 alpha-2 country, user-declared; null = most restrictive AI rules. */
   region?: string | null;
   isDemoMode: boolean;
@@ -170,6 +172,10 @@ export interface CopilotMessage {
   suggestedActions?: { label: string; action: string }[];
   /** Changes the assistant prepared; each runs only when the user presses Confirm. */
   proposals?: ActionProposal[];
+  /** One-tap answers when the assistant asked a question. */
+  quickReplies?: string[];
+  /** The command the assistant's question is about; sent back with the user's reply. */
+  pending?: { name: string; args: Record<string, unknown>; field: string };
 }
 
 /** FinanceContext methods the assistant may call (plus two UI ops). The client checks this list again. */

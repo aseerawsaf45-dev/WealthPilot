@@ -428,6 +428,10 @@ function WealthPilotApp() {
             setIsAssistantOpen(false);
             setIsQuickAddOpen(true);
           }}
+          onExpand={() => {
+            setIsAssistantOpen(false);
+            setActiveTab('copilot');
+          }}
         />
       )}
 

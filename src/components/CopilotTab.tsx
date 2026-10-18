@@ -7,19 +7,26 @@ import { api } from '../lib/api';
 import { formatFact } from '../lib/money';
 import { AiConsentDialog } from './AiConsentDialog';
 import { looksLikeCommand, parseScope, SEGMENTS } from '../lib/assistant';
+import type { ChatSummary } from '../context/useChatHistory';
 import { ASSISTANT_OPS, type ActionProposal, type CopilotFact, type CopilotMessage } from '../types/finance';
 import {
   Sparkles,
-  Send,
-  ShieldAlert,
+  ArrowUp,
   CheckCircle2,
   Trash2,
-  Lock,
-  Compass,
   ArrowRight,
   AlertTriangle,
   Check,
   X,
+  SquarePen,
+  PanelLeft,
+  Maximize2,
+  MessageSquare,
+  History,
+  PiggyBank,
+  ReceiptText,
+  Target,
+  Wallet,
 } from 'lucide-react';
 
 interface ServerAnswer {
@@ -30,6 +37,9 @@ interface ServerAnswer {
   limitations: string[];
   source: 'rules' | 'llm:groq';
   proposals?: ActionProposal[];
+  needsReply?: boolean;
+  quickReplies?: string[];
+  pending?: CopilotMessage['pending'];
 }
 
 // Server action ids -> app tabs. Unknown ids are ignored (the model never controls navigation targets).
@@ -42,18 +52,43 @@ const ACTION_TABS: Record<string, string> = {
   open_settings_privacy: 'settings',
 };
 
+const STARTERS = [
+  { icon: Wallet, title: 'Where did my money go?', prompt: 'How much did I spend this month?' },
+  { icon: Target, title: 'Plan a new goal', prompt: 'I want to create a goal called New Car for $15,000 by 2027-10-01' },
+  { icon: ReceiptText, title: 'Bills coming up', prompt: 'What bills are due soon?' },
+  { icon: PiggyBank, title: 'Record and organise', prompt: 'add $12 coffee and open transactions' },
+];
+
 // Module-level so the React compiler doesn't treat it as an impure call during render.
 const messageId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
+/** Groups chats like Claude's sidebar: Today, Yesterday, Previous 7 days, Older. */
+function groupChats(chats: ChatSummary[], now: number) {
+  const day = 86_400_000;
+  const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+  const groups: { label: string; items: ChatSummary[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'Previous 7 days', items: [] },
+    { label: 'Older', items: [] },
+  ];
+  for (const c of chats) {
+    const t = new Date(c.updatedAt).getTime();
+    groups[t >= startOfToday ? 0 : t >= startOfToday - day ? 1 : t >= startOfToday - 7 * day ? 2 : 3].items.push(c);
+  }
+  return groups.filter((g) => g.items.length);
+}
 
 interface CopilotTabProps {
   onNavigate?: (tab: string) => void;
   onOpenQuickAdd?: () => void;
-  /** Floating assistant panel: no page header or starter grid; fills its container. */
+  /** Floating assistant panel: fills its container and shows close / full-page buttons. */
   compact?: boolean;
+  onClose?: () => void;
+  onExpand?: () => void;
 }
 
-export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: CopilotTabProps) {
+export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClose, onExpand }: CopilotTabProps) {
   const finance = useFinance();
   const {
     accounts,
@@ -65,61 +100,78 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
     copilotHistory,
     addCopilotMessage,
     updateCopilotMessage,
-    clearCopilotHistory,
     setPreferences,
-  } = useFinance();
+    chats,
+    activeChatId,
+    newChat,
+    openChat,
+    deleteChat,
+    deleteAllChats,
+  } = finance;
 
   const [inputQuery, setInputQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
   const [runningKey, setRunningKey] = useState<string | null>(null);
   const [menuIndex, setMenuIndex] = useState(0);
-  // "/" at the start of the input opens the segment menu, filtered by what follows it.
+  const [sidebarOpen, setSidebarOpen] = useState(!compact);
+  const [now] = useState(() => Date.now());
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadEnd = useRef<HTMLDivElement>(null);
+
+  // "/" at the start of the input opens the section menu, filtered by what follows it.
   const slashQuery = /^\/[a-z]*$/i.test(inputQuery) ? inputQuery.slice(1).toLowerCase() : null;
   const segmentOptions = slashQuery === null ? [] : SEGMENTS.filter((seg) => seg.id.startsWith(slashQuery));
   const pickSegment = (id: string) => {
     setInputQuery(`/${id} `);
     setMenuIndex(0);
+    inputRef.current?.focus();
   };
-  const threadEnd = useRef<HTMLDivElement>(null);
+
   // Braces matter: newer Chrome's scrollIntoView returns a Promise, and an effect must return nothing or a cleanup.
   useEffect(() => {
     threadEnd.current?.scrollIntoView({ block: 'end' });
   }, [copilotHistory.length, isProcessing]);
+
+  // The textarea grows with its content (up to ~6 lines).
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [inputQuery]);
+
   const isSignedIn = preferences.isAuthenticated === true;
   // Signed in, the server answers with calculations even when AI wording is off.
   const canAsk = isSignedIn || preferences.isAiEnabled;
+  const conversation = copilotHistory.filter((m) => m.id !== 'init_welcome'); // the demo greeting is replaced by the empty state
+  const isEmpty = !conversation.some((m) => m.sender === 'user');
+  const activeTitle = chats.find((c) => c.id === activeChatId)?.title ?? 'New chat';
 
-  const samplePrompts = [
-    'Summarize my spending this month',
-    'Why is dining my second highest expense?',
-    'Scan ledger for duplicate charges',
-    'Compare debt payoff options',
-    'How is my emergency fund goal progressing?',
-  ];
+  const reply = (content: string) => addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content });
 
   const handleSend = async (queryToSend?: string) => {
-    const text = queryToSend || inputQuery;
-    if (!text.trim() || isProcessing || !canAsk) return;
+    const text = (queryToSend ?? inputQuery).trim();
+    if (!text || isProcessing || !canAsk) return;
     const { scope, text: question } = parseScope(text);
+    // Recent turns let a follow-up ("maybe $30") finish the earlier request.
+    const history = copilotHistory
+      .filter((m) => m.content && m.id !== 'init_welcome')
+      .slice(-6)
+      .map((m) => ({ role: m.sender, content: m.content.slice(0, 1200) }));
+    const last = copilotHistory.at(-1);
+    const followUp = !!last?.clarificationNeeded;
+    const pending = followUp ? last?.pending : undefined;
 
-    // 1. Append user message
-    const userMsg = {
-      id: messageId('user'),
-      sender: 'user' as const,
-      timestamp: new Date().toISOString(),
-      content: text.trim(),
-    };
-    addCopilotMessage(userMsg);
+    addCopilotMessage({ id: messageId('user'), sender: 'user', timestamp: new Date().toISOString(), content: text });
     setInputQuery('');
     setIsProcessing(true);
 
     if (isSignedIn) {
-      // 2a. Server copilot: numbers are calculated server-side from your saved data.
-      let reply: CopilotMessage;
+      // Server copilot: numbers are calculated server-side from your saved data.
       try {
-        const res = await api.post<ServerAnswer>('/ai/copilot', { message: question, ...(scope && { scope }) });
-        reply = {
+        const res = await api.post<ServerAnswer>('/ai/copilot', { message: question, history, followUp, ...(pending && { pending }), ...(scope && { scope }) });
+        addCopilotMessage({
           id: messageId('copilot'),
           sender: 'assistant',
           timestamp: new Date().toISOString(),
@@ -130,43 +182,23 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
           insights: res.insights,
           suggestedActions: res.suggested_actions,
           proposals: res.proposals,
-        };
+          clarificationNeeded: res.needsReply,
+          quickReplies: res.quickReplies,
+          pending: res.pending,
+        });
       } catch (e) {
-        reply = {
-          id: messageId('copilot'),
-          sender: 'assistant',
-          timestamp: new Date().toISOString(),
-          content: e instanceof Error ? e.message : 'The copilot is unavailable right now.',
-        };
+        reply(e instanceof Error ? e.message : 'The assistant is unavailable right now.');
       }
-      addCopilotMessage(reply);
       setIsProcessing(false);
       return;
     }
 
-    // 2b. Demo mode (signed out): local deterministic engine over the demo data (read-only).
+    // Demo mode (signed out): local deterministic engine over the demo data (read-only).
     setTimeout(() => {
       const seg = scope && SEGMENTS.find((x) => x.id === scope);
-      if (seg && !question) {
-        addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content: `Things I can do in ${seg.label} once you sign in: ${seg.examples.map((e) => `"${e}"`).join(', ')}.` });
-        setIsProcessing(false);
-        return;
-      }
-      if (looksLikeCommand(question)) {
-        addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content: 'Sign in to let the assistant make changes. In demo mode I can answer questions about the sample data.' });
-        setIsProcessing(false);
-        return;
-      }
-      const response = executeCopilotQuery(question, {
-        accounts,
-        transactions,
-        budgets,
-        goals,
-        debts,
-        isAiEnabled: preferences.isAiEnabled,
-      });
-
-      addCopilotMessage(response);
+      if (seg && !question) reply(`Things I can do in ${seg.label} once you sign in: ${seg.examples.map((e) => `"${e}"`).join(', ')}.`);
+      else if (looksLikeCommand(question)) reply('Sign in to let the assistant make changes. In demo mode I can answer questions about the sample data.');
+      else addCopilotMessage(executeCopilotQuery(question, { accounts, transactions, budgets, goals, debts, isAiEnabled: preferences.isAiEnabled }));
       setIsProcessing(false);
     }, 400);
   };
@@ -210,346 +242,472 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
     setRunningKey(null);
   };
 
-  return (
-    <div className={compact ? 'flex h-full min-h-0 flex-col gap-3' : 'space-y-6 max-w-4xl mx-auto'}>
-      {/* Header */}
-      {!compact && (
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold text-[#0F172A] tracking-tight">AI Financial Copilot</h1>
-            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-mono font-semibold border ${
-              canAsk
-                ? 'bg-sky-50 text-sky-800 border-sky-200'
-                : 'bg-rose-50 text-rose-800 border-rose-200'
-            }`}>
-              {isSignedIn ? (preferences.isAiEnabled ? 'AI Wording On' : 'Calculated Answers') : preferences.isAiEnabled ? 'Demo Engine' : 'Offline Mode'}
-            </span>
-          </div>
-          <p className="text-xs text-slate-600 font-medium mt-1">
-            Every number is calculated by WealthPilot from your ledger. The AI, when on, only words the answer.
-          </p>
-        </div>
+  const startNewChat = () => {
+    newChat();
+    if (compact) setSidebarOpen(false);
+    inputRef.current?.focus();
+  };
 
-        <button
-          onClick={clearCopilotHistory}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white hover:bg-slate-50 text-xs text-slate-700 hover:text-black border border-black/[0.08] transition-colors cursor-pointer shadow-2xs font-semibold"
-        >
-          <Trash2 className="w-3.5 h-3.5 text-slate-400" />
-          <span>Clear History</span>
+  // ---- Sidebar ---------------------------------------------------------------------------------
+
+  const sidebar = sidebarOpen && (
+    <aside
+      aria-label="Chat history"
+      className={`${compact ? 'absolute inset-y-0 left-0 z-20 w-72 shadow-2xl' : 'absolute inset-y-0 left-0 z-20 w-72 shadow-2xl md:static md:z-auto md:shadow-none'} flex flex-col border-r border-slate-200 bg-slate-50`}
+    >
+      <div className="flex items-center justify-between px-3 pt-3 pb-2">
+        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+          <History className="h-3.5 w-3.5" /> Chats
+        </span>
+        <button onClick={() => setSidebarOpen(false)} aria-label="Hide chat history" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200/70 hover:text-slate-700 cursor-pointer">
+          <PanelLeft className="h-4 w-4" />
         </button>
       </div>
-      )}
-
-      {/* Signed in with AI wording off: calculated answers still work */}
-      {isSignedIn && !preferences.isAiEnabled && (
-        <div className="p-4 rounded-2xl bg-sky-50 border border-sky-200 flex flex-wrap items-start justify-between gap-3 text-xs text-sky-900">
-          <div className="flex items-start gap-3">
-            <Lock className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-sky-950">AI wording is off</p>
-              <p className="text-sky-800 leading-relaxed mt-0.5">
-                Answers are calculated by WealthPilot and nothing is sent to an AI provider.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setConsentOpen(true)}
-            className="px-3.5 py-1.5 rounded-full bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold cursor-pointer"
-          >
-            Turn on AI wording
-          </button>
-        </div>
-      )}
-
-      {/* Demo mode kill switch */}
-      {!isSignedIn && !preferences.isAiEnabled && (
-        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">
-          <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-bold text-amber-950">Privacy Mode Activated</p>
-            <p className="text-amber-800 leading-relaxed mt-0.5">
-              AI Copilot query processing is disabled in your Privacy Settings. WealthPilot is functioning in 100% offline local ledger mode. You can re-enable this anytime in Privacy & Settings.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Suggested Starters */}
-      {!compact && (
-      <div className="space-y-2">
-        <p className="text-[11px] text-neutral-400 uppercase tracking-wider font-semibold">Suggested Grounded Inquiries:</p>
-        <div className="flex flex-wrap gap-2">
-          {samplePrompts.map((prompt) => (
-            <button
-              key={prompt}
-              onClick={() => handleSend(prompt)}
-              className="px-3.5 py-1.5 rounded-full bg-white hover:bg-sky-50 hover:text-sky-800 hover:border-sky-300 border border-black/[0.08] text-xs text-neutral-700 font-medium transition-colors cursor-pointer shadow-2xs"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
+      <div className="px-3 pb-2">
+        <button
+          onClick={startNewChat}
+          className="flex w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 shadow-2xs hover:border-sky-300 hover:bg-sky-50 cursor-pointer"
+        >
+          <SquarePen className="h-3.5 w-3.5 text-sky-600" /> New chat
+        </button>
       </div>
-      )}
 
-      {/* Conversation Thread */}
-      <div className={compact ? 'flex-1 min-h-0 space-y-4 overflow-y-auto pr-1' : 'keel-card p-6 space-y-5 min-h-[420px] max-h-[600px] overflow-y-auto'}>
-        {compact && copilotHistory.length <= 1 && (
-          <div className="space-y-2 text-xs text-slate-600">
-            <p className="font-semibold text-slate-800">Ask for advice, or tell me what to change.</p>
+      <nav className="flex-1 overflow-y-auto px-2 pb-3">
+        {chats.length === 0 && <p className="px-2 py-6 text-center text-[11px] text-slate-400">Your chats will appear here.</p>}
+        {groupChats(chats, now).map((g) => (
+          <div key={g.label} className="mt-2">
+            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{g.label}</p>
+            <ul className="space-y-0.5">
+              {g.items.map((c) => (
+                <li key={c.id} className="group relative">
+                  <button
+                    onClick={() => {
+                      void openChat(c.id);
+                      if (compact) setSidebarOpen(false);
+                    }}
+                    aria-current={c.id === activeChatId ? 'true' : undefined}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-2 pr-8 text-left text-xs cursor-pointer ${
+                      c.id === activeChatId ? 'bg-white font-semibold text-slate-900 shadow-2xs ring-1 ring-slate-200' : 'text-slate-600 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Delete "${c.title}"?`)) void deleteChat(c.id);
+                    }}
+                    aria-label={`Delete chat ${c.title}`}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 opacity-0 hover:bg-rose-50 hover:text-rose-600 focus:opacity-100 group-hover:opacity-100 cursor-pointer"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <div className="border-t border-slate-200 p-3 text-[11px]">
+        {!isSignedIn ? (
+          <p className="text-slate-500">Sign in to save chats across devices.</p>
+        ) : preferences.chatHistoryEnabled ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+              <CheckCircle2 className="h-3 w-3" /> History saved
+            </span>
+            {chats.length > 0 && (
+              <button
+                onClick={() => {
+                  if (window.confirm('Delete all saved chats? This cannot be undone.')) void deleteAllChats();
+                }}
+                className="text-slate-500 hover:text-rose-600 cursor-pointer"
+              >
+                Delete all
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-slate-600 leading-snug">Chats are kept only until you reload. Save them to your account to pick up later on any device.</p>
+            <button
+              onClick={() => setPreferences({ chatHistoryEnabled: true })}
+              className="w-full rounded-lg bg-[#0F172A] px-3 py-1.5 font-semibold text-white hover:bg-neutral-800 cursor-pointer"
+            >
+              Save chat history
+            </button>
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+
+  // ---- Messages ---------------------------------------------------------------------------------
+
+  const renderMessage = (msg: CopilotMessage) => {
+    if (msg.sender === 'user') {
+      return (
+        <div key={msg.id} className="flex justify-end">
+          <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-[#0F172A] px-4 py-2.5 text-[13px] leading-relaxed text-white shadow-sm">{msg.content}</p>
+        </div>
+      );
+    }
+    const proposals = msg.proposals ?? [];
+    const pending = proposals.flatMap((q, j) => (q.status ? [] : [j]));
+    const hasDelete = pending.some((j) => proposals[j].destructive);
+    return (
+      <div key={msg.id} className="flex gap-3">
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-indigo-600 shadow-sm">
+          <Sparkles className="h-3.5 w-3.5 text-white" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-3 text-[13px] leading-relaxed text-slate-800">
+          <p className="whitespace-pre-wrap">{msg.content}</p>
+
+          {msg.insights && msg.insights.length > 0 && (
+            <ul className="space-y-1.5">
+              {msg.insights.map((ins) => (
+                <li key={ins.title} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <span className="font-semibold text-slate-900">{ins.title}</span>
+                  <span className="text-slate-600"> · {ins.description}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {msg.facts && msg.facts.length > 0 && (
+            <ul aria-label="Calculated facts" className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              {msg.facts.slice(0, 6).map((f) => (
+                <li key={f.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <p className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-500">{f.label}</p>
+                  <p className="font-mono text-[13px] font-semibold text-slate-900">
+                    {formatFact(f)}
+                    {f.kind === 'estimate' && <span className="ml-1 font-sans text-[10px] font-medium text-amber-700">estimate</span>}
+                  </p>
+                </li>
+              ))}
+              {msg.facts.length > 6 && <li className="self-center px-1 text-[11px] text-slate-500">+{msg.facts.length - 6} more figures</li>}
+            </ul>
+          )}
+
+          {proposals.length > 0 && (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-3.5 py-2.5">
+                <span className="text-xs font-bold text-slate-900">{proposals.length > 1 ? `Plan · ${proposals.length} steps` : 'Change to confirm'}</span>
+                {proposals.length > 1 && pending.length > 0 && (
+                  <button
+                    onClick={() => runSteps(msg, pending)}
+                    disabled={!!runningKey}
+                    className={`rounded-full px-3 py-1.5 text-[11px] font-bold text-white disabled:opacity-50 cursor-pointer ${hasDelete ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0F172A] hover:bg-neutral-800'}`}
+                  >
+                    {runningKey?.startsWith(`${msg.id}:`) ? 'Running…' : `Run all ${pending.length}${hasDelete ? ' · includes a delete' : ''}`}
+                  </button>
+                )}
+              </div>
+              <ol aria-label="Changes to confirm" className="divide-y divide-slate-100">
+                {proposals.map((p, i) => {
+                  const running = runningKey === `${msg.id}:${i}`;
+                  return (
+                    <li key={i} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-3">
+                      <span
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                          p.status === 'done' ? 'bg-emerald-100 text-emerald-700' : p.status === 'failed' ? 'bg-rose-100 text-rose-700' : p.destructive ? 'bg-rose-50 text-rose-600' : 'bg-sky-50 text-sky-700'
+                        }`}
+                      >
+                        {p.status === 'done' ? <Check className="h-3 w-3" /> : p.destructive && !p.status ? <AlertTriangle className="h-3 w-3" aria-label="Cannot be undone" /> : i + 1}
+                      </span>
+                      <p className={`min-w-0 flex-1 text-xs font-medium ${p.status === 'cancelled' ? 'text-slate-400 line-through' : p.destructive ? 'text-rose-900' : 'text-slate-800'}`}>{p.summary}</p>
+                      {!p.status ? (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => setStep(msg.id, i, { status: 'cancelled' })}
+                            disabled={running}
+                            className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50 cursor-pointer"
+                          >
+                            {proposals.length > 1 ? 'Skip' : 'Cancel'}
+                          </button>
+                          <button
+                            onClick={() => runSteps(msg, [i])}
+                            disabled={!!runningKey}
+                            className={`rounded-full px-3 py-1 text-[11px] font-bold text-white disabled:opacity-50 cursor-pointer ${p.destructive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-sky-600 hover:bg-sky-700'}`}
+                          >
+                            {running ? 'Saving…' : p.destructive ? 'Delete' : 'Confirm'}
+                          </button>
+                        </div>
+                      ) : (
+                        <span role="status" className={`text-[11px] font-semibold ${p.status === 'done' ? 'text-emerald-700' : p.status === 'failed' ? 'text-rose-700' : 'text-slate-400'}`}>
+                          {p.status === 'done' ? 'Done' : p.status === 'failed' ? `Not saved: ${p.error}` : proposals.length > 1 ? 'Skipped' : 'Cancelled'}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
+
+          {msg.quickReplies && msg.quickReplies.length > 0 && msg.id === copilotHistory[copilotHistory.length - 1]?.id && (
             <div className="flex flex-wrap gap-1.5">
-              {['How much did I spend this month?', 'add $12 coffee and open transactions', 'set dining budget to $300', '/goals', 'Compare debt payoff options'].map((q) => (
-                <button key={q} onClick={() => handleSend(q)} className="px-2.5 py-1 rounded-full bg-white hover:bg-sky-50 border border-slate-200 text-[11px] font-medium cursor-pointer">
+              {msg.quickReplies.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => handleSend(q)}
+                  disabled={isProcessing}
+                  className="rounded-full border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-50 cursor-pointer"
+                >
                   {q}
                 </button>
               ))}
             </div>
+          )}
+
+          {msg.limitations && msg.limitations.length > 0 && (
+            <ul className="space-y-0.5 text-[11px] text-amber-800">
+              {msg.limitations.map((l) => (
+                <li key={l}>Note: {l}</li>
+              ))}
+            </ul>
+          )}
+
+          {msg.suggestedActions && msg.suggestedActions.length > 0 && onNavigate && (
+            <div className="flex flex-wrap gap-1.5">
+              {msg.suggestedActions
+                .filter((a) => ACTION_TABS[a.action])
+                .map((a) => (
+                  <button
+                    key={a.action}
+                    onClick={() => onNavigate(ACTION_TABS[a.action])}
+                    className="flex items-center gap-1 rounded-full border border-sky-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-50 cursor-pointer"
+                  >
+                    {a.label}
+                    <ArrowRight className="h-3 w-3" />
+                  </button>
+                ))}
+            </div>
+          )}
+
+          {msg.source && (
+            <p className="flex items-center gap-1 text-[10px] font-medium text-slate-400">
+              <CheckCircle2 className="h-3 w-3" />
+              {msg.source === 'rules'
+                ? 'Calculated by WealthPilot'
+                : msg.facts?.length
+                  ? 'Worded by AI · every number calculated by WealthPilot'
+                  : 'Understood by AI · checked by WealthPilot'}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ---- Layout -----------------------------------------------------------------------------------
+
+  return (
+    <div
+      className={
+        compact
+          ? 'relative flex h-full min-h-0 overflow-hidden'
+          : 'relative flex h-[calc(100dvh-12rem)] min-h-[560px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm'
+      }
+    >
+      {sidebar}
+      {sidebarOpen && compact && <div className="absolute inset-0 z-10 bg-slate-900/10" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
+
+      <section className="flex min-w-0 flex-1 flex-col bg-white">
+        {/* Header */}
+        <header className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-4">
+          {!sidebarOpen && (
+            <button onClick={() => setSidebarOpen(true)} aria-label="Show chat history" title="Chat history" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer">
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-bold text-slate-900">{isEmpty ? 'WealthPilot Assistant' : activeTitle}</h2>
+            <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500">
+              <span className={`h-1.5 w-1.5 rounded-full ${isSignedIn && preferences.isAiEnabled ? 'bg-emerald-500' : isSignedIn ? 'bg-sky-500' : 'bg-amber-500'}`} />
+              {isSignedIn ? (preferences.isAiEnabled ? 'AI on · changes need your confirmation' : 'Calculated answers · AI off') : 'Demo data · read-only'}
+            </p>
+          </div>
+          <button onClick={startNewChat} aria-label="New chat" title="New chat" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer">
+            <SquarePen className="h-4 w-4" />
+          </button>
+          {onExpand && (
+            <button onClick={onExpand} aria-label="Open full page" title="Open full page" className="hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 sm:block cursor-pointer">
+              <Maximize2 className="h-4 w-4" />
+            </button>
+          )}
+          {onClose && (
+            <button onClick={onClose} aria-label="Close assistant" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </header>
+
+        {isSignedIn && !preferences.isAiEnabled && (
+          <div className="flex items-center justify-between gap-3 border-b border-sky-100 bg-sky-50 px-4 py-2 text-[11px] text-sky-900">
+            <span>AI is off: I answer with calculations and simple commands. Turn it on for free-form requests and follow-ups.</span>
+            <button onClick={() => setConsentOpen(true)} className="shrink-0 rounded-full bg-[#0F172A] px-3 py-1 font-semibold text-white hover:bg-neutral-800 cursor-pointer">
+              Turn on
+            </button>
           </div>
         )}
-        {copilotHistory.map((msg) => {
-          const isUser = msg.sender === 'user';
 
-          return (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}
-            >
-              {!isUser && (
-                <div className="w-8 h-8 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center shrink-0 shadow-2xs">
-                  <Sparkles className="w-4 h-4 text-sky-600" />
-                </div>
-              )}
-
-              <div
-                className={`max-w-xl rounded-2xl p-4 text-xs leading-relaxed space-y-2.5 ${
-                  isUser
-                    ? 'bg-[#0F172A] text-white font-medium shadow-sm'
-                    : 'bg-slate-50 border border-slate-200 text-[#0F172A]'
-                }`}
-              >
-                <p>{msg.content}</p>
-
-                {/* Prepared changes: nothing is saved until Confirm */}
-                {!isUser && msg.proposals && msg.proposals.length > 1 && (() => {
-                  const pending = msg.proposals.flatMap((q, j) => (q.status ? [] : [j]));
-                  const hasDelete = pending.some((j) => msg.proposals![j].destructive);
-                  return (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sky-50 border border-sky-200 px-3 py-2">
-                      <span className="font-bold text-sky-950">Plan · {msg.proposals.length} steps</span>
-                      {pending.length > 0 && (
-                        <button
-                          onClick={() => runSteps(msg, pending)}
-                          disabled={!!runningKey}
-                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold text-white cursor-pointer disabled:opacity-50 ${hasDelete ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0F172A] hover:bg-neutral-800'}`}
-                        >
-                          {runningKey?.startsWith(`${msg.id}:`) ? 'Running…' : `Run all ${pending.length}${hasDelete ? ' (includes a delete)' : ''}`}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })()}
-                {!isUser && msg.proposals && msg.proposals.length > 0 && (
-                  <ol className="space-y-2" aria-label="Changes to confirm">
-                    {msg.proposals.map((p, i) => {
-                      const running = runningKey === `${msg.id}:${i}`;
-                      return (
-                        <li key={i} className={`wp-pop rounded-xl border p-3 bg-white ${p.destructive && !p.status ? 'border-rose-300' : 'border-slate-200'}`}>
-                          <p className={`flex items-start gap-1.5 font-semibold ${p.destructive ? 'text-rose-900' : 'text-slate-900'}`}>
-                            {msg.proposals!.length > 1 && <span className="shrink-0 font-mono text-slate-400">{i + 1}.</span>}
-                            {p.destructive && <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px text-rose-600" aria-label="Cannot be undone" />}
-                            {p.summary}
-                          </p>
-                          {!p.status ? (
-                            <div className="mt-2 flex gap-2">
-                              <button
-                                onClick={() => runSteps(msg, [i])}
-                                disabled={!!runningKey}
-                                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold text-white cursor-pointer disabled:opacity-50 ${p.destructive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0F172A] hover:bg-neutral-800'}`}
-                              >
-                                <Check className="w-3 h-3" />
-                                {running ? 'Saving…' : p.destructive ? 'Confirm delete' : 'Confirm'}
-                              </button>
-                              <button
-                                onClick={() => setStep(msg.id, i, { status: 'cancelled' })}
-                                disabled={running}
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-slate-200 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
-                              >
-                                <X className="w-3 h-3" />
-                                {msg.proposals!.length > 1 ? 'Skip' : 'Cancel'}
-                              </button>
-                            </div>
-                          ) : (
-                            <p role="status" className={`mt-1.5 text-[11px] font-semibold ${p.status === 'done' ? 'text-emerald-700' : p.status === 'failed' ? 'text-rose-700' : 'text-slate-500'}`}>
-                              {p.status === 'done' ? '✓ Done' : p.status === 'failed' ? `Not saved: ${p.error}` : msg.proposals!.length > 1 ? 'Skipped' : 'Cancelled'}
-                            </p>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
-
-                {/* Server answer: insights, facts (the only source of numbers), limitations, actions */}
-                {!isUser && msg.insights && msg.insights.length > 0 && (
-                  <ul className="space-y-1">
-                    {msg.insights.map((ins) => (
-                      <li key={ins.title}>
-                        <span className="font-semibold">{ins.title}:</span> {ins.description}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {!isUser && msg.facts && msg.facts.length > 0 && (
-                  <ul aria-label="Calculated facts" className="flex flex-wrap gap-1.5">
-                    {msg.facts.slice(0, 8).map((f) => (
-                      <li key={f.id} className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[10px] text-slate-700">
-                        {f.label}: <span className="font-mono font-semibold">{formatFact(f)}</span>
-                        {f.kind === 'estimate' && <span className="text-amber-700"> (estimate)</span>}
-                      </li>
-                    ))}
-                    {msg.facts.length > 8 && <li className="text-[10px] text-slate-500 self-center">+{msg.facts.length - 8} more</li>}
-                  </ul>
-                )}
-                {!isUser && msg.limitations && msg.limitations.length > 0 && (
-                  <ul className="text-[10px] text-amber-800 space-y-0.5">
-                    {msg.limitations.map((l) => (
-                      <li key={l}>Note: {l}</li>
-                    ))}
-                  </ul>
-                )}
-                {!isUser && msg.suggestedActions && msg.suggestedActions.length > 0 && onNavigate && (
-                  <div className="flex flex-wrap gap-2">
-                    {msg.suggestedActions
-                      .filter((a) => ACTION_TABS[a.action])
-                      .map((a) => (
-                        <button
-                          key={a.action}
-                          onClick={() => onNavigate(ACTION_TABS[a.action])}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white hover:bg-sky-50 border border-sky-200 text-[10px] font-semibold text-sky-800 cursor-pointer"
-                        >
-                          {a.label}
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
-                      ))}
-                  </div>
-                )}
-                {!isUser && msg.source && (
-                  <p className="pt-2 border-t border-slate-200 flex items-center gap-1 text-[10px] text-slate-500 font-medium">
-                    <CheckCircle2 className="w-3 h-3 text-sky-600" />
-                    {msg.source === 'llm:groq'
-                      ? 'Worded by AI (Groq) · every number calculated by WealthPilot'
-                      : 'Calculated by WealthPilot · no AI involved'}
-                  </p>
-                )}
-
-                {/* Evidence Citation Chip */}
-                {msg.evidence && !isUser && (
-                  <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2 text-[10px] text-slate-500 font-medium">
-                    <span className="flex items-center gap-1 text-sky-700 font-semibold">
-                      <CheckCircle2 className="w-3 h-3 text-sky-600" />
-                      <span>Evidence: {msg.evidence.scope}</span>
+        {/* Thread */}
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          {isEmpty ? (
+            <div className="mx-auto flex max-w-xl flex-col items-center pt-4 text-center sm:pt-10">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 shadow-lg shadow-sky-500/25">
+                <Sparkles className="h-6 w-6 text-white" />
+              </div>
+              <h3 className="mt-4 text-lg font-bold tracking-tight text-slate-900">How can I help with your money today?</h3>
+              <p className="mt-1 max-w-sm text-xs text-slate-500">Ask for advice, or tell me what to change. I&apos;ll show a plan and wait for your confirmation before saving anything.</p>
+              <div className={`mt-6 grid w-full gap-2 ${compact ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                {STARTERS.map(({ icon: Icon, title, prompt }) => (
+                  <button
+                    key={title}
+                    onClick={() => handleSend(prompt)}
+                    disabled={!canAsk}
+                    className="group flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left hover:border-sky-300 hover:bg-sky-50/50 disabled:opacity-50 cursor-pointer"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 group-hover:bg-sky-100 group-hover:text-sky-700">
+                      <Icon className="h-4 w-4" />
                     </span>
-                    <span>•</span>
-                    <span>Scope: {msg.evidence.transactionCount} records</span>
-                    <span>•</span>
-                    <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 font-mono font-semibold">
-                      {msg.evidence.confidence === 'verified_fact' ? 'Verified Fact' : 'Estimate'}
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-slate-900">{title}</span>
+                      <span className="block truncate text-[11px] text-slate-500">{prompt}</span>
                     </span>
-                  </div>
-                )}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-5 flex flex-wrap justify-center gap-1.5">
+                {SEGMENTS.filter((s) => ['goals', 'budgets', 'bills', 'transactions', 'debts'].includes(s.id)).map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => handleSend(`/${s.id}`)}
+                    disabled={!canAsk}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-mono text-[11px] text-slate-600 hover:border-sky-300 hover:text-sky-800 disabled:opacity-50 cursor-pointer"
+                  >
+                    /{s.id}
+                  </button>
+                ))}
               </div>
             </div>
-          );
-        })}
+          ) : (
+            <div className="mx-auto max-w-3xl space-y-6">{conversation.map(renderMessage)}</div>
+          )}
 
-        {isProcessing && (
-          <div className="flex gap-3 justify-start items-center text-xs text-slate-600 font-medium">
-            <div className="w-8 h-8 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center animate-spin">
-              <Compass className="w-4 h-4 text-sky-600" />
+          {isProcessing && (
+            <div className="mx-auto mt-6 flex max-w-3xl items-center gap-3" role="status" aria-label="Assistant is thinking">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-indigo-600">
+                <Sparkles className="h-3.5 w-3.5 text-white" />
+              </div>
+              <span className="flex gap-1">
+                {[0, 150, 300].map((d) => (
+                  <span key={d} className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: `${d}ms` }} />
+                ))}
+              </span>
             </div>
-            <span>Reconciling records and evaluating deterministic calculations...</span>
-          </div>
-        )}
-        <div ref={threadEnd} />
-      </div>
+          )}
+          <div ref={threadEnd} />
+        </div>
 
-      {/* Query Input Bar */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSend();
-        }}
-        className="relative"
-      >
-        {segmentOptions.length > 0 && (
-          <ul
-            id="wp-segment-menu"
-            role="listbox"
-            aria-label="Pick what you need help with"
-            className="wp-pop absolute bottom-full left-0 mb-2 w-64 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl z-10"
-          >
-            {segmentOptions.map((seg, i) => (
-              <li key={seg.id} role="option" aria-selected={i === menuIndex}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pickSegment(seg.id)}
-                  className={`w-full rounded-xl px-3 py-2 text-left text-xs cursor-pointer ${i === menuIndex ? 'bg-sky-50 text-sky-900' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  <span className="font-mono font-semibold">/{seg.id}</span>
-                  <span className="block text-[10px] text-slate-500 truncate">{seg.examples[0]}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <input
-          type="text"
-          placeholder={compact ? 'Ask, say what to change, or type / for a section…' : 'Ask Copilot a question, tell it what to change, or type / to pick a section...'}
-          value={inputQuery}
-          onChange={(e) => {
-            setInputQuery(e.target.value);
-            setMenuIndex(0);
+        {/* Composer */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
           }}
-          onKeyDown={(e) => {
-            if (!segmentOptions.length) return;
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-              e.preventDefault();
-              setMenuIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : segmentOptions.length - 1)) % segmentOptions.length);
-            } else if (e.key === 'Enter' || e.key === 'Tab') {
-              e.preventDefault();
-              pickSegment(segmentOptions[Math.min(menuIndex, segmentOptions.length - 1)].id);
-            } else if (e.key === 'Escape') {
-              e.stopPropagation(); // closes the menu, not the assistant panel
-              setInputQuery('');
-            }
-          }}
-          role="combobox"
-          aria-expanded={segmentOptions.length > 0}
-          aria-controls="wp-segment-menu"
-          aria-autocomplete="list"
-          disabled={!canAsk || isProcessing}
-          aria-label="Ask the copilot a question"
-          maxLength={500}
-          className="w-full pl-5 pr-28 py-3.5 rounded-full bg-white border border-slate-200 text-xs text-[#0F172A] placeholder-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-50 font-medium"
-        />
-        <button
-          type="submit"
-          disabled={!inputQuery.trim() || !canAsk || isProcessing}
-          className="absolute right-2 top-2 bottom-2 px-5 bg-[#0F172A] hover:bg-neutral-800 text-white font-semibold text-xs rounded-full flex items-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer shadow-xs"
+          className="border-t border-slate-100 bg-white px-3 pb-3 pt-2.5 sm:px-4"
         >
-          <span>Query</span>
-          <Send className="w-3 h-3 text-sky-400" />
-        </button>
-      </form>
+          <div className="relative mx-auto max-w-3xl">
+            {segmentOptions.length > 0 && (
+              <ul
+                id="wp-segment-menu"
+                role="listbox"
+                aria-label="Pick what you need help with"
+                className="wp-pop absolute bottom-full left-0 z-10 mb-2 max-h-72 w-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl"
+              >
+                <li className="px-2.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400" role="presentation">
+                  Get help with
+                </li>
+                {segmentOptions.map((seg, i) => (
+                  <li key={seg.id} role="option" aria-selected={i === menuIndex}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => pickSegment(seg.id)}
+                      className={`w-full rounded-xl px-2.5 py-2 text-left cursor-pointer ${i === menuIndex ? 'bg-sky-50' : 'hover:bg-slate-50'}`}
+                    >
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-xs font-semibold text-slate-900">/{seg.id}</span>
+                        <span className="text-[10px] text-slate-400">{seg.label}</span>
+                      </span>
+                      <span className="block truncate text-[11px] text-slate-500">e.g. {seg.examples[0]}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 shadow-2xs focus-within:border-sky-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-sky-500/10">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={inputQuery}
+                placeholder={canAsk ? 'Ask anything, or tell me what to change…  Type / for a section' : 'Turn on AI in Settings to use the demo assistant'}
+                onChange={(e) => {
+                  setInputQuery(e.target.value);
+                  setMenuIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (segmentOptions.length) {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setMenuIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : segmentOptions.length - 1)) % segmentOptions.length);
+                      return;
+                    }
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      e.preventDefault();
+                      pickSegment(segmentOptions[Math.min(menuIndex, segmentOptions.length - 1)].id);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.stopPropagation(); // closes the menu, not the assistant panel
+                      setInputQuery('');
+                      return;
+                    }
+                  }
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                role="combobox"
+                aria-expanded={segmentOptions.length > 0}
+                aria-controls="wp-segment-menu"
+                aria-autocomplete="list"
+                disabled={!canAsk || isProcessing}
+                aria-label="Ask the copilot a question"
+                maxLength={500}
+                className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-[13px] leading-relaxed text-slate-900 placeholder-slate-400 focus:outline-none disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!inputQuery.trim() || !canAsk || isProcessing}
+                aria-label="Send"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#0F172A] text-white transition-colors hover:bg-sky-600 disabled:bg-slate-300 cursor-pointer"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1.5 text-center text-[10px] text-slate-400">
+              Enter to send · Shift+Enter for a new line · Not financial advice; numbers are calculated from your ledger.
+            </p>
+          </div>
+        </form>
+      </section>
 
       <AiConsentDialog isOpen={consentOpen} onClose={() => setConsentOpen(false)} />
-
-      {/* AI Disclaimer */}
-      <p className={`text-center text-slate-500 font-medium ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
-        WealthPilot Copilot is a personal productivity assistant, not a licensed CPA, tax specialist, or investment adviser. Always confirm financial decisions with qualified professionals.
-      </p>
     </div>
   );
 }

@@ -192,6 +192,7 @@ export const PreferencesPatch = z
         }
       }, 'Unknown timezone'),
     region: z.string().regex(/^[A-Z]{2}$/, 'Use a 2-letter country code').nullable(),
+    chatHistoryEnabled: z.boolean(), // false also deletes saved assistant chats
     uiPrefs: z
       .object({
         theme: z.enum(['dark', 'light', 'system']),

@@ -778,6 +778,67 @@ describe('Assistant commands (propose, never write)', () => {
     assert.deepStrictEqual(offered.sort(), ['add_bill', 'delete_bill', 'get_upcoming_bills', 'navigate', 'pay_bill', 'update_bill']);
   });
 
+  it('finishes a request across messages: the follow-up goes to the model with the chat so far', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    let seen: { role: string; content: string }[] = [];
+    const llm = async (req: { messages: { role: string; content: string }[] }) => {
+      seen = req.messages;
+      return {
+        role: 'assistant' as const,
+        content: null,
+        tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'add_goal', arguments: JSON.stringify({ name: 'Car', target: '30', targetDate: '2027-10-18' }) } }],
+      };
+    };
+    const history = [
+      { role: 'user' as const, content: 'i want to add a new goal to buy a car next year' },
+      { role: 'assistant' as const, content: 'Please tell me the target amount as a number, e.g. "$25".' },
+    ];
+    const res = await answerQuestion('may be 20 to 30 usd', data, { llm } as never, { history, followUp: true });
+    assert.ok(seen.some((m) => m.content.includes('buy a car')), 'earlier turns reach the model');
+    assert.strictEqual(res.proposals?.[0]?.op, 'addGoal');
+    assert.strictEqual((res.proposals![0].args[0] as { targetCents: number }).targetCents, 3000);
+    const { looksLikeCommand } = await import('../src/lib/assistant.ts');
+    assert.ok(looksLikeCommand('i want to add a new goal') && looksLikeCommand("I'd like to pay Netflix") && !looksLikeCommand('i want to know my spending'));
+  });
+
+  it('asks again (needsReply) when a follow-up still has no amount the user wrote', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const llm = async () => ({
+      role: 'assistant' as const,
+      content: null,
+      tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'add_goal', arguments: JSON.stringify({ name: 'Car', target: '25000' }) } }],
+    });
+    const res = await answerQuestion('add it to the goals section', data, { llm } as never, { history: [{ role: 'user', content: 'a goal for a car' }], followUp: true });
+    assert.strictEqual(res.proposals?.length ?? 0, 0);
+    assert.strictEqual(res.needsReply, true);
+    // Live Groq turned "20 to 30 usd" into 2500: rejected, and the user gets their own numbers as one-tap answers.
+    const range = async () => ({
+      role: 'assistant' as const,
+      content: null,
+      tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'add_goal', arguments: JSON.stringify({ name: 'Car', target: 2500 }) } }],
+    });
+    const asked = await answerQuestion('may be 20 to 30 usd', data, { llm: range } as never, { history: [{ role: 'user', content: 'a goal for a car' }], followUp: true });
+    assert.deepStrictEqual(asked.quickReplies, ['$20.00', '$30.00']);
+    assert.ok(asked.answer.includes('Which target amount should I use'));
+
+    // The reply "$30.00" completes the pending command with NO model call (works when AI is off or out of quota).
+    assert.deepStrictEqual(asked.pending, { name: 'add_goal', args: { name: 'Car' }, field: 'target' });
+    const done = await answerQuestion('$30.00', data, { llm: null }, { followUp: true, pending: asked.pending });
+    assert.strictEqual(done.proposals?.[0]?.op, 'addGoal');
+    assert.strictEqual((done.proposals![0].args[0] as { targetCents: number }).targetCents, 3000);
+    const { singleAmount } = await import('../src/server/ai/commands.ts');
+    assert.deepStrictEqual(['make it 2,500 usd', '$30.00', 'maybe 30', '20 to 30', 'hello'].map(singleAmount), ['2500', '30.00', '30', null, null]);
+  });
+
+  it('validates saved chats at the trust boundary', async () => {
+    const { ConversationInput } = await import('../src/server/repos/copilot.ts');
+    const msg = { id: 'm1', sender: 'user', timestamp: '2026-10-18T00:00:00Z', content: 'hi' };
+    assert.ok(ConversationInput.safeParse({ title: 'hi', messages: [msg] }).success);
+    assert.ok(!ConversationInput.safeParse({ title: 'hi', messages: [{ ...msg, sender: 'system' }] }).success, 'only user/assistant turns');
+    assert.ok(!ConversationInput.safeParse({ title: '', messages: [] }).success, 'title required');
+    assert.ok(!ConversationInput.safeParse({ title: 'x', messages: Array(201).fill(msg) }).success, 'at most 200 messages');
+  });
+
   it('the copilot route rejects an unknown /segment', async () => {
     const { z } = await import('zod');
     const { SEGMENT_IDS } = await import('../src/lib/assistant.ts');

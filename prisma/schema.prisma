@@ -50,6 +50,7 @@ model User {
   debts             DebtAccount[]
   auditLogs         AuditEvent[]
   copilotMessages   CopilotMessage[]
+  copilotConversations CopilotConversation[]
   sessions          Session[]
   merchantRules     MerchantRule[]
 
@@ -291,6 +292,20 @@ model CopilotMessage {
 
   @@index([userId, createdAt])
   @@map("copilot_messages")
+}
+
+/// One saved assistant chat (only when the user turned on chat history). messages = the client's CopilotMessage[].
+model CopilotConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  messages  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+  @@map("copilot_conversations")
 }
 
 // -----------------------------------------------------------------------------

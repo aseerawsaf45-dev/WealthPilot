@@ -20,22 +20,43 @@ export { looksLikeCommand } from '@/lib/assistant';
 export const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'] as const;
 const TAB_ALIASES: Record<string, (typeof TABS)[number]> = { home: 'overview', dashboard: 'overview', debts: 'planning', debt: 'planning', privacy: 'settings', assistant: 'copilot', chat: 'copilot' };
 
-type Resolved = { proposal: ActionProposal } | { clarify: string };
+/** A command waiting for its amount: sent back by the client with the user's answer (re-validated like any call). */
+export interface PendingCommand {
+  name: string;
+  args: Record<string, unknown>;
+  field: string;
+}
+type Resolved = { proposal: ActionProposal } | { clarify: string; askAmount?: string; options?: string[]; pending?: PendingCommand };
+
+/** Which argument holds the amount a command asks for when it's missing. */
+const AMOUNT_FIELD: Record<string, string> = {
+  add_transaction: 'amount',
+  add_goal: 'target',
+  update_goal: 'target',
+  contribute_goal: 'amount',
+  set_budget: 'amount',
+  add_bill: 'amount',
+  update_bill: 'amount',
+  add_debt: 'balance',
+};
 type Ctx = { data: FinanceData; message: string };
 
 const amount = z.union([z.string().trim().min(1).max(20), z.number()]).describe('Amount exactly as the user wrote it, e.g. "12.50"');
+// Required amounts are still optional for the model: when the user hasn't said one, it leaves it out and we ask.
+const needed = amount.optional().describe('Amount exactly as the user wrote it; leave out if the user has not said one');
 const name = z.string().trim().min(1).max(80);
 
 // ---- Helpers ----------------------------------------------------------------
 
 /** Cents of an amount the user actually wrote; null when the number is not in their message. */
-function centsFromMessage(value: string | number, message: string): number | null {
+function centsFromMessage(value: string | number | undefined, message: string): number | null {
+  if (value === undefined) return null;
   const c = dollarsToCents(String(value).replace(/,/g, ''));
   const written = (message.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) ?? []).map((n) => dollarsToCents(n));
   return c > 0 && written.includes(c) ? c : null;
 }
 
-const noAmount = (what: string): Resolved => ({ clarify: `Please tell me the ${what} as a number, e.g. "$25".` });
+const noAmount = (what: string): Resolved => ({ clarify: `Please tell me the ${what} as a number, e.g. "$25".`, askAmount: what });
 
 function findOne<T extends { name: string; id?: string }>(items: T[], query: string, kind: string): T | string {
   const q = query.trim().toLowerCase();
@@ -82,7 +103,7 @@ export const COMMANDS: CommandDef[] = [
   {
     name: 'add_transaction',
     description: 'Record an expense or income the user describes.',
-    args: z.object({ amount, merchant: name, type: z.enum(['expense', 'income']).default('expense'), category: name.optional(), date: ymd.optional(), account: name.optional() }),
+    args: z.object({ amount: needed, merchant: name, type: z.enum(['expense', 'income']).default('expense'), category: name.optional(), date: ymd.optional(), account: name.optional() }),
     resolve: (a: { amount: string; merchant: string; type: 'expense' | 'income'; category?: string; date?: string; account?: string }, { data, message }) => {
       const c = centsFromMessage(a.amount, message);
       if (!c) return noAmount('amount');
@@ -120,7 +141,7 @@ export const COMMANDS: CommandDef[] = [
   {
     name: 'add_goal',
     description: 'Create a savings goal with a target amount and optional deadline.',
-    args: z.object({ name, target: amount, targetDate: ymd.optional() }),
+    args: z.object({ name, target: needed, targetDate: ymd.optional() }),
     resolve: (a: { name: string; target: string; targetDate?: string }, { data, message }) => {
       const c = centsFromMessage(a.target, message);
       if (!c) return noAmount('target amount');
@@ -159,7 +180,7 @@ export const COMMANDS: CommandDef[] = [
   {
     name: 'contribute_goal',
     description: 'Add money to a savings goal.',
-    args: z.object({ name, amount }),
+    args: z.object({ name, amount: needed }),
     resolve: (a: { name: string; amount: string }, { data, message }) => {
       const c = centsFromMessage(a.amount, message);
       if (!c) return noAmount('amount');
@@ -201,7 +222,7 @@ export const COMMANDS: CommandDef[] = [
   {
     name: 'set_budget',
     description: "Set this month's budget for a spending category.",
-    args: z.object({ category: name, amount }),
+    args: z.object({ category: name, amount: needed }),
     resolve: (a: { category: string; amount: string }, { data, message }) => {
       const c = centsFromMessage(a.amount, message);
       if (!c) return noAmount('budget amount');
@@ -225,7 +246,7 @@ export const COMMANDS: CommandDef[] = [
   {
     name: 'add_bill',
     description: 'Add a recurring bill or subscription.',
-    args: z.object({ name, amount, frequency: z.enum(['weekly', 'monthly', 'quarterly', 'annual']).default('monthly'), nextDueDate: ymd.optional() }),
+    args: z.object({ name, amount: needed, frequency: z.enum(['weekly', 'monthly', 'quarterly', 'annual']).default('monthly'), nextDueDate: ymd.optional() }),
     resolve: (a: { name: string; amount: string; frequency: 'weekly' | 'monthly' | 'quarterly' | 'annual'; nextDueDate?: string }, { data, message }) => {
       const c = centsFromMessage(a.amount, message);
       if (!c) return noAmount('bill amount');
@@ -287,7 +308,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Add a debt (loan or credit card) with balance, interest rate (APR %) and minimum payment.',
     args: z.object({
       name,
-      balance: amount,
+      balance: needed,
       aprPercent: z.union([z.string(), z.number()]).optional(),
       minimumPayment: amount.optional(),
       kind: z.enum(['credit_card', 'student_loan', 'car_loan', 'mortgage', 'personal_loan']).default('personal_loan'),
@@ -401,12 +422,29 @@ export function resolveCommand(call: ToolCall, data: FinanceData, message: strin
   if (!cmd) return { clarify: "I can't do that." };
   const args = cmd.args.safeParse(call.args ?? {});
   if (!args.success) return { clarify: "I couldn't work out the details of that change. Could you say it another way?" };
-  return cmd.resolve(args.data as never, { data, message });
+  const r = cmd.resolve(args.data as never, { data, message });
+  if (!('askAmount' in r) || !r.askAmount) return r;
+  // The amount is missing or unclear: remember the command so a reply like "$30" completes it, and offer
+  // the numbers the user just wrote (e.g. "20 to 30 usd") as one-tap answers.
+  const field = AMOUNT_FIELD[call.name];
+  const rest = Object.fromEntries(Object.entries(args.data as Record<string, unknown>).filter(([k, v]) => k !== field && v !== undefined));
+  const pending = field ? { name: call.name, args: rest, field } : undefined;
+  const latest = message.split('\n').pop() ?? '';
+  const written = [...new Set(latest.replace(/,/g, '').match(/\d+(?:\.\d{1,2})?/g) ?? [])].slice(0, 4);
+  if (!written.length) return { ...r, pending };
+  const options = written.map((n) => formatMoney(dollarsToCents(n), data.currency));
+  return { clarify: `Which ${r.askAmount} should I use: ${options.join(' or ')}? Or type another amount.`, options, pending };
 }
 
 // ---- Rules parser (works without AI) ------------------------------------------
 
 const AMT = String.raw`[$৳€£]?\s?(\d[\d,]*(?:\.\d{1,2})?)`;
+
+/** "$30", "make it 30 usd", "about 2,500" → "30" / "2500": a reply that is just one amount. */
+export function singleAmount(message: string): string | null {
+  const m = message.trim().match(/^(?:(?:maybe|may be|make it|use|about|around|say|it's|its)\s+)?[$৳€£]?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:usd|dollars?|bdt|taka|eur|gbp)?[.!]?$/i);
+  return m ? m[1].replace(/,/g, '') : null;
+}
 
 /** Common commands in plain words. null = not a recognised command. */
 export function rulesCommand(message: string): ToolCall | null {

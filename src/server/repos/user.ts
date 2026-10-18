@@ -24,6 +24,7 @@ const profileSelect = {
   aiConsentAt: true,
   aiConsentVersion: true,
   aiProviders: true,
+  chatHistoryEnabled: true,
   uiPrefs: true,
   merchantRules: { select: { normalizedMerchant: true, category: true }, orderBy: { updatedAt: 'asc' } },
 } satisfies Prisma.UserSelect;
@@ -45,6 +46,7 @@ function toClientPreferences(user: ProfileRow): Partial<UserPreferences> & { reg
     // Effective state: consent to an older notice no longer counts, so the UI shows AI off and asks again.
     isAiEnabled: canUseLlm(user, 'groq') || canUseLlm(user, 'gemini'),
     aiProviders: user.aiProviders,
+    chatHistoryEnabled: user.chatHistoryEnabled,
     autoCategorizationRules: user.merchantRules.map((r) => ({ id: r.normalizedMerchant, keyword: r.normalizedMerchant, category: r.category })),
   };
 }
@@ -65,9 +67,12 @@ export async function updatePreferences(userId: string, patch: z.infer<typeof Pr
         preferredCurrency: patch.preferredCurrency,
         timezone: patch.timezone,
         region: patch.region,
+        chatHistoryEnabled: patch.chatHistoryEnabled,
         uiPrefs: patch.uiPrefs ? { ...(current.uiPrefs as object), ...patch.uiPrefs } : undefined,
       },
     });
+    // Turning chat history off erases what was saved (privacy by default).
+    if (patch.chatHistoryEnabled === false) await tx.copilotConversation.deleteMany({ where: { userId } });
     if (patch.categorizationRules) {
       await tx.merchantRule.deleteMany({ where: { userId } });
       await tx.merchantRule.createMany({
@@ -121,6 +126,7 @@ export async function clearFinancialData(userId: string) {
     await tx.savingsGoal.deleteMany({ where: { userId } });
     await tx.debtAccount.deleteMany({ where: { userId } });
     await tx.copilotMessage.deleteMany({ where: { userId } });
+    await tx.copilotConversation.deleteMany({ where: { userId } });
     await writeAudit(tx, userId, 'USER_DATA_CLEARED', 'financial data deleted by user');
   });
 }

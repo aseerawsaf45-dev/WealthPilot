@@ -45,4 +45,10 @@ export interface CopilotAnswer extends LlmNarration {
   source: 'rules' | 'llm:groq' | 'llm:gemini';
   /** Changes for the user to confirm (assistant commands). */
   proposals?: ActionProposal[];
+  /** The answer asks the user for missing details; their next message continues this request. */
+  needsReply?: boolean;
+  /** One-tap answers to that question (e.g. the amounts the user wrote). */
+  quickReplies?: string[];
+  /** The command waiting for that answer; the client sends it back with the reply. */
+  pending?: { name: string; args: Record<string, unknown>; field: string };
 }

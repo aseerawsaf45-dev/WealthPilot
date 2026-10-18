@@ -24,6 +24,7 @@ import {
 } from '../lib/seedData';
 import { autoCategorizeMerchant } from '../services/financeService';
 import { api, ApiError } from '../lib/api';
+import { useChatHistory, type ChatSummary } from './useChatHistory';
 
 /**
  * Signed in: every action calls /api/v1 and applies the SERVER's response to state.
@@ -101,6 +102,13 @@ interface FinanceContextType {
   /** A function patch sees the latest message, so sequential updates (e.g. a plan's steps) don't overwrite each other. */
   updateCopilotMessage: (id: string, patch: Partial<CopilotMessage> | ((m: CopilotMessage) => Partial<CopilotMessage>)) => void;
   clearCopilotHistory: () => void;
+  /** Assistant chat history (sidebar): saved across devices when preferences.chatHistoryEnabled is on. */
+  chats: ChatSummary[];
+  activeChatId: string | null;
+  newChat: () => void;
+  openChat: (id: string) => Promise<void>;
+  deleteChat: (id: string) => Promise<void>;
+  deleteAllChats: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string, preferredCurrency?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -156,6 +164,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const isAuthed = preferences.isAuthenticated === true;
   const pendingPrefs = useRef<Record<string, unknown>>({});
   const prefsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatHistory = useChatHistory({
+    isAuthed,
+    enabled: !!preferences.chatHistoryEnabled,
+    history: copilotHistory,
+    setHistory: setCopilotHistory,
+    onError: setSyncError,
+  });
 
   const applyBootstrap = (data: Bootstrap) => {
     setAccounts(data.accounts);
@@ -181,6 +196,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setDebts(initialDebts);
     setAuditLogs([]);
     setCopilotHistory([welcomeMessage]);
+    chatHistory.resetChats();
     setPreferencesState({ ...defaultPreferences, isAuthenticated: false });
   };
 
@@ -637,6 +653,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (prefs.baseCurrency !== undefined) p.preferredCurrency = prefs.baseCurrency;
     if (prefs.timezone !== undefined) p.timezone = prefs.timezone;
     if (prefs.region !== undefined) p.region = prefs.region;
+    if (prefs.chatHistoryEnabled !== undefined) p.chatHistoryEnabled = prefs.chatHistoryEnabled;
     if (prefs.autoCategorizationRules !== undefined) {
       p.categorizationRules = prefs.autoCategorizationRules.map((r) => ({ keyword: r.keyword, category: r.category }));
     }
@@ -760,6 +777,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         addCopilotMessage,
         updateCopilotMessage,
         clearCopilotHistory,
+        ...chatHistory,
         login,
         signup,
         logout,

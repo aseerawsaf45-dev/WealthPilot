@@ -13,7 +13,7 @@ import { sanitizePromptInput } from '@/services/copilotService';
 import { LlmNarration, SUGGESTED_ACTIONS, type CopilotAnswer, type Fact } from './schema';
 import { TOOLS, runTool, toolByName, type FinanceData, type ToolOutput } from './tools';
 import { routeIntent, type ToolCall } from './router';
-import { COMMANDS, commandByName, resolveCommand, rulesCommands, looksLikeCommand, MAX_STEPS, SEGMENT_TOOLS } from './commands';
+import { COMMANDS, commandByName, resolveCommand, rulesCommands, looksLikeCommand, singleAmount, MAX_STEPS, SEGMENT_TOOLS, type PendingCommand } from './commands';
 import { SEGMENTS, type SegmentId } from '@/lib/assistant';
 import { redactForLlm } from './privacy';
 import { addDays } from '../mappers';
@@ -167,7 +167,9 @@ function narrationMessages(question: string, facts: Fact[]): LlmMessage[] {
 }
 
 /** LLM call #1 for questions the router didn't match: the model picks tools; args are Zod-validated later. */
-async function selectTools(llm: LlmClient, question: string, data: FinanceData, scope?: SegmentId): Promise<{ calls: ToolCall[]; provider?: string }> {
+type Turn = { role: 'user' | 'assistant'; content: string };
+
+async function selectTools(llm: LlmClient, question: string, data: FinanceData, scope?: SegmentId, history: Turn[] = []): Promise<{ calls: ToolCall[]; provider?: string }> {
   // Command tools only extract details from the user's message; the server resolves and the user confirms.
   // A "/segment" narrows the choice to that part of the app (plus navigation).
   const allowed = scope && new Set([...SEGMENT_TOOLS[scope].read, ...SEGMENT_TOOLS[scope].commands, 'navigate']);
@@ -182,10 +184,15 @@ async function selectTools(llm: LlmClient, question: string, data: FinanceData, 
         content:
           `You choose which WealthPilot calculations answer the user's question. Today is ${data.today}; the user's currency is ${data.currency}. ` +
           `Call at most ${MAX_TOOL_CALLS} tools. Dates are YYYY-MM-DD; money is integer minor units. If no tool fits, call none. ` +
-          'If the user asks to change something, call the matching command tool, copying names and amounts exactly as the user wrote them; never make up an amount. ' +
+          'If the user asks to change something, call the matching command tool, copying names and amounts exactly as the user wrote them ' +
+          '(command amounts are in the currency as written, e.g. "25000" for $25,000, not minor units); never make up, average or pick an amount from a range. ' +
+          'If the user wants a change but has not given an amount, still call the command and leave the amount out; WealthPilot will ask them. ' +
           `If the request needs several changes, call up to ${MAX_STEPS} command tools in the order they should run; the user reviews this plan before anything runs.` +
-          (scope ? ` The user is asking about the ${SEGMENTS.find((s) => s.id === scope)!.label} part of the app.` : ''),
+          (scope ? ` The user is asking about the ${SEGMENTS.find((s) => s.id === scope)!.label} part of the app.` : '') +
+          (history.length ? ' Earlier turns of this chat come first; use them to complete a request the user is following up on.' : ''),
       },
+      // Earlier turns are the user's own words and our own replies (no tool data), redacted like the question.
+      ...history.map((t) => ({ role: t.role, content: redactForLlm(t.content) })),
       { role: 'user', content: redactForLlm(question) },
     ],
     tools,
@@ -227,12 +234,14 @@ export function clampModelDates(args: Record<string, unknown>, today: string): b
  * `opts.calls` skips routing (the server already knows the calculation, e.g. the goal planner);
  * `opts.narrate` lets the model word those results when AI is allowed.
  * `opts.scope` is the "/segment" the user picked: alone it gives that segment's overview, with text it focuses tool choice.
+ * `opts.history` (recent turns) lets the model finish a request across messages; `opts.followUp` says the last answer asked a question.
+ * `opts.pending` is the command that question was about: a reply that is just an amount completes it without the model.
  */
 export async function answerQuestion(
   message: string,
   data: FinanceData,
   deps: AnswerDeps,
-  opts: { calls?: ToolCall[]; narrate?: boolean; scope?: SegmentId } = {}
+  opts: { calls?: ToolCall[]; narrate?: boolean; scope?: SegmentId; history?: Turn[]; followUp?: boolean; pending?: PendingCommand } = {}
 ): Promise<CopilotAnswer & { tools: string[] }> {
   const limitations = [...(deps.limitations ?? [])];
   const finish = (n: LlmNarration, source: CopilotAnswer['source'], a?: ReturnType<typeof assemble>, tools: string[] = []) => ({
@@ -257,7 +266,9 @@ export async function answerQuestion(
 
   // Commands become proposals the user confirms in the app; nothing is written here.
   const commandAnswer = (cmds: ToolCall[], source: CopilotAnswer['source']) => {
-    const resolved = cmds.slice(0, MAX_STEPS).map((c) => resolveCommand(c, data, question));
+    // Amounts may come from the user's earlier messages in this chat (a follow-up), never from anywhere else.
+    const userWords = [...(opts.history ?? []).filter((t) => t.role === 'user').map((t) => t.content), question].join('\n');
+    const resolved = cmds.slice(0, MAX_STEPS).map((c) => resolveCommand(c, data, userWords));
     const proposals = resolved.flatMap((r) => ('proposal' in r ? [r.proposal] : []));
     const clarify = resolved.flatMap((r) => ('clarify' in r ? [r.clarify] : []));
     const lead =
@@ -266,7 +277,13 @@ export async function answerQuestion(
         : proposals.length
           ? `Here's my plan (${proposals.length} steps). Review it, then run it all or confirm step by step.`
           : '';
-    return { ...finish({ answer: [lead, ...clarify].filter(Boolean).join(' '), insights: [], suggested_actions: [] }, source, undefined, cmds.map((c) => c.name)), proposals };
+    return {
+      ...finish({ answer: [lead, ...clarify].filter(Boolean).join(' '), insights: [], suggested_actions: [] }, source, undefined, cmds.map((c) => c.name)),
+      proposals,
+      needsReply: clarify.length > 0,
+      quickReplies: [...new Set(resolved.flatMap((r) => ('options' in r && r.options) || []))],
+      pending: resolved.flatMap((r) => ('pending' in r && r.pending ? [r.pending] : []))[0],
+    };
   };
   if (opts.scope && !question) {
     const seg = SEGMENTS.find((s) => s.id === opts.scope)!;
@@ -276,9 +293,14 @@ export async function answerQuestion(
     const base = await answerQuestion(`${seg.label} overview`, data, { llm: null, limitations: deps.limitations }, { calls: [overview(data.today)] });
     return { ...base, answer: `${base.answer} ${tips}` };
   }
+  const amountReply = opts.pending && singleAmount(question);
+  if (opts.pending && amountReply) {
+    return commandAnswer([{ name: opts.pending.name, args: { ...opts.pending.args, [opts.pending.field]: amountReply } }], 'rules');
+  }
   const ruled = !opts.calls && rulesCommands(question);
   if (ruled) return commandAnswer(ruled, 'rules');
-  const commandish = !opts.calls && looksLikeCommand(question);
+  // A reply to our clarifying question ("maybe $30") goes to the model with the chat so far, not the router.
+  const commandish = !opts.calls && (looksLikeCommand(question) || !!opts.followUp);
 
   const categories = [
     ...data.transactions.flatMap((t) => [t.category, ...(t.splits ?? []).map((s) => s.category)]),
@@ -290,7 +312,7 @@ export async function answerQuestion(
     const help = commandish ? COMMAND_HELP : HELP_TEXT;
     if (!deps.llm) return plain(help);
     try {
-      const picked = await selectTools(deps.llm, question, data, opts.scope);
+      const picked = await selectTools(deps.llm, question, data, opts.scope, opts.history);
       calls = picked.calls;
       const cmds = calls.filter((c) => commandByName(c.name));
       if (cmds.length) return commandAnswer(cmds, picked.provider === 'gemini' ? 'llm:gemini' : 'llm:groq');

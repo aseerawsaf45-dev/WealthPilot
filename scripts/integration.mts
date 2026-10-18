@@ -84,6 +84,28 @@ describe('ledger: derived balances, void, cross-tenant', () => {
   });
 });
 
+describe('assistant chat history', () => {
+  it('saves only with history on, scopes every chat to its owner, and erases chats when history is turned off', async () => {
+    const copilot = await import('../src/server/repos/copilot.ts');
+    const { updatePreferences } = await import('../src/server/repos/user.ts');
+    const messages = [{ id: 'm1', sender: 'user' as const, timestamp: '2026-10-18T00:00:00Z', content: 'add $12 coffee' }];
+    await assert.rejects(copilot.createConversation(userA, { title: 'off', messages }), (e: unknown) => e instanceof HttpError && e.status === 403);
+
+    await updatePreferences(userA, { chatHistoryEnabled: true });
+    const chat = await copilot.createConversation(userA, { title: 'Coffee', messages });
+    assert.strictEqual((await copilot.getConversation(userA, chat.id)).title, 'Coffee');
+
+    await updatePreferences(userB, { chatHistoryEnabled: true });
+    await expect404(copilot.getConversation(userB, chat.id));
+    await expect404(copilot.updateConversation(userB, chat.id, { title: 'Hacked' }));
+    await expect404(copilot.deleteConversation(userB, chat.id));
+    assert.strictEqual((await copilot.listConversations(userB)).length, 0);
+
+    await updatePreferences(userA, { chatHistoryEnabled: false });
+    assert.strictEqual((await copilot.listConversations(userA)).length, 0, 'turning history off deletes saved chats');
+  });
+});
+
 describe('import: dedupe, rollback, re-import', () => {
   it('skips duplicates on re-import, and rollback frees the fingerprints', async () => {
     const acc = await ledger.createAccount(userA, {
