@@ -269,7 +269,7 @@ export async function answerQuestion(
     // Amounts may come from the user's earlier messages in this chat (a follow-up), never from anywhere else.
     const userWords = [...(opts.history ?? []).filter((t) => t.role === 'user').map((t) => t.content), question].join('\n');
     const resolved = cmds.slice(0, MAX_STEPS).map((c) => resolveCommand(c, data, userWords));
-    const proposals = resolved.flatMap((r) => ('proposal' in r ? [r.proposal] : []));
+    const proposals = resolved.flatMap((r) => ('proposal' in r ? [r.proposal, ...(r.then ? [r.then] : [])] : []));
     const clarify = resolved.flatMap((r) => ('clarify' in r ? [r.clarify] : []));
     const lead =
       proposals.length === 1
@@ -297,7 +297,7 @@ export async function answerQuestion(
   if (opts.pending && amountReply) {
     return commandAnswer([{ name: opts.pending.name, args: { ...opts.pending.args, [opts.pending.field]: amountReply } }], 'rules');
   }
-  const ruled = !opts.calls && rulesCommands(question);
+  const ruled = !opts.calls && rulesCommands(question, data.today);
   if (ruled) return commandAnswer(ruled, 'rules');
   // A reply to our clarifying question ("maybe $30") goes to the model with the chat so far, not the router.
   const commandish = !opts.calls && (looksLikeCommand(question) || !!opts.followUp);

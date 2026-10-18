@@ -79,7 +79,8 @@ interface FinanceContextType {
   addBudget: (bgt: Omit<BudgetCategory, 'id'>) => Promise<void>;
   updateBudget: (id: string, updates: Partial<BudgetCategory>) => Promise<void>;
   deleteBudget: (id: string) => Promise<void>;
-  addGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => Promise<void>;
+  /** Returns the created goal (undefined if saving failed). */
+  addGoal: (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => Promise<SavingsGoal | undefined>;
   updateGoal: (id: string, updates: Partial<SavingsGoal>) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
   contributeToGoal: (id: string, amountCents: number) => Promise<boolean>;
@@ -366,11 +367,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const addGoal = async (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>) => {
+  const addGoal = async (goal: Omit<SavingsGoal, 'id' | 'userId' | 'createdAt'>): Promise<SavingsGoal | undefined> => {
     if (!isAuthed) {
-      setGoals((prev) => [...prev, { ...goal, id: `goal_${Date.now()}`, userId: preferences.userId, createdAt: new Date().toISOString() }]);
-      return;
+      const local = { ...goal, id: `goal_${Date.now()}`, userId: preferences.userId, createdAt: new Date().toISOString() };
+      setGoals((prev) => [...prev, local]);
+      return local;
     }
+    let saved: SavingsGoal | undefined;
     await run(async () => {
       const created = await api.post<SavingsGoal>('/goals', {
         name: goal.name,
@@ -381,8 +384,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         priority: goal.priority,
         isPaused: goal.isPaused,
       });
+      saved = created;
       setGoals((prev) => [...prev, created]);
     });
+    return saved;
   };
 
   const updateGoal = async (id: string, updates: Partial<SavingsGoal>) => {

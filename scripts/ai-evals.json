@@ -590,7 +590,7 @@
     },
     {
       "id": "command-freeform-needs-ai",
-      "question": "create a goal called Japan trip for $3,000",
+      "question": "rename my checking account to something nicer",
       "expect": {
         "source": "rules",
         "factCount": 0,
@@ -609,6 +609,20 @@
           "navigate"
         ],
         "llmCalls": 0
+      }
+    },
+    {
+      "id": "command-goal-natural-language",
+      "question": "i want to buy a car which price is about 100 usd within next year, add this goal with a plan.",
+      "expect": {
+        "source": "rules",
+        "tools": [
+          "add_goal"
+        ],
+        "llmCalls": 0,
+        "answerIncludes": [
+          "plan (2 steps)"
+        ]
       }
     }
   ]

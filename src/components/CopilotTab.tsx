@@ -118,6 +118,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
   const [now] = useState(() => Date.now());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
+  const createdIds = useRef(new Map<string, string>()); // message id -> id of the record its plan created (for '$prev' steps)
 
   // "/" at the start of the input opens the section menu, filtered by what follows it.
   const slashQuery = /^\/[a-z]*$/i.test(inputQuery) ? inputQuery.slice(1).toLowerCase() : null;
@@ -203,18 +204,25 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
     }, 400);
   };
 
-  /** Runs one proposal through the same FinanceContext action the app's own buttons use. Returns an error message, if any. */
-  const execute = async (p: ActionProposal): Promise<string | undefined> => {
+  /**
+   * Runs one proposal through the same FinanceContext action the app's own buttons use. '$prev' in its args is
+   * the record an earlier step of the same plan created (e.g. "create goal" then "make a plan for it").
+   */
+  const execute = async (msgId: string, p: ActionProposal): Promise<string | undefined> => {
     if (!(ASSISTANT_OPS as readonly string[]).includes(p.op)) return 'Unknown action.';
+    const prev = createdIds.current.get(msgId);
+    if (p.args.includes('$prev') && !prev) return 'Confirm the step before this one first.';
+    const args = p.args.map((a) => (a === '$prev' ? prev : a));
     let error: string | undefined;
     try {
-      if (p.op === 'navigate') onNavigate?.(String(p.args[0]));
+      if (p.op === 'navigate') onNavigate?.(String(args[0]));
       else if (p.op === 'openQuickAdd') onOpenQuickAdd?.();
       else {
-        const res: unknown = await (finance[p.op] as (...a: unknown[]) => unknown)(...p.args);
-        // Actions report failure as false, { success: false, conflict } or { error }; the rest show the app's error toast.
-        if (res === false) error = 'That change could not be saved.';
+        const res: unknown = await (finance[p.op] as (...a: unknown[]) => unknown)(...args);
+        // Actions report failure as false, undefined (add*), { success: false, conflict } or { error }; the rest show the app's error toast.
+        if (res === false || (p.op === 'addGoal' && !res)) error = 'That change could not be saved.';
         else if (res && typeof res === 'object') {
+          if ('id' in res && typeof res.id === 'string') createdIds.current.set(msgId, res.id);
           const r = res as { success?: boolean; conflict?: string; error?: string };
           if (r.error) error = r.error;
           else if (r.success === false) error = r.conflict ?? 'That change could not be saved.';
@@ -235,7 +243,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
       const p = msg.proposals?.[i];
       if (!p || p.status) continue;
       setRunningKey(`${msg.id}:${i}`);
-      const error = await execute(p);
+      const error = await execute(msg.id, p);
       setStep(msg.id, i, { status: error ? 'failed' : 'done', error });
       if (error) break;
     }

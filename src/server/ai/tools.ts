@@ -304,7 +304,7 @@ const MAX_PLAN_MONTHS = 600; // beyond 50 years a "later deadline" is not a real
 const FIXED_SPEND = /(housing|rent|mortgage|utilit|insurance|income|transfer|debt|loan|tax|medical|health)/i;
 
 /** YYYY-MM-DD `months` after `ymd`, clamped to the month's last day. */
-function addMonthsYmd(ymd: string, months: number): string {
+export function addMonthsYmd(ymd: string, months: number): string {
   const target = monthRange(shiftMonth(ymd.slice(0, 7), months));
   const day = `${target.start.slice(0, 8)}${ymd.slice(8, 10)}`;
   return day > target.end ? target.end : day;

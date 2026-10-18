@@ -746,7 +746,7 @@ describe('Assistant commands (propose, never write)', () => {
     assert.strictEqual(calls, 0);
     assert.strictEqual(res.proposals?.length, 1);
     assert.ok(res.proposals![0].summary.includes('$15.99'));
-    const help = await answerQuestion('create a goal called Japan trip for $3,000', data, { llm: null });
+    const help = await answerQuestion('rename my checking account to something nicer', data, { llm: null });
     assert.ok(!help.proposals?.length && help.answer.includes('With AI turned on'), 'free-form commands need AI; nothing is guessed');
   });
 
@@ -839,6 +839,24 @@ describe('Assistant commands (propose, never write)', () => {
     assert.ok(!ConversationInput.safeParse({ title: 'x', messages: Array(201).fill(msg) }).success, 'at most 200 messages');
   });
 
+  it("turns the user's own sentence into a 2-step plan (create goal, then plan it) without AI", async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const res = await answerQuestion('i want to buy a car which price is about 100 usd withing next year, add this goal with a plan.', data, { llm: null }, { scope: 'goals' });
+    assert.deepStrictEqual(res.proposals?.map((p) => p.op), ['addGoal', 'planGoal']);
+    const goal = res.proposals![0].args[0] as { name: string; targetCents: number; targetDate: string };
+    assert.deepStrictEqual([goal.name, goal.targetCents, goal.targetDate], ['Car', 10000, '2027-10-18']);
+    assert.deepStrictEqual(res.proposals![1].args, ['$prev'], 'the plan step uses the goal created by step 1');
+    // Questions about goals stay questions.
+    const q = await answerQuestion('how is my emergency fund goal progressing?', data, { llm: null });
+    assert.ok(!q.proposals?.length);
+    const { rulesCommands, parseWhen } = await import('../src/server/ai/commands.ts');
+    assert.deepStrictEqual(
+      ['I bought a coffee for $5', 'set a budget of $300 for dining', 'add my netflix subscription $15.99 monthly', 'mark Spotify as paid'].map((m) => rulesCommands(m, '2026-10-18')?.[0]?.name),
+      ['add_transaction', 'set_budget', 'add_bill', 'pay_bill']
+    );
+    assert.deepStrictEqual([parseWhen('by march', '2026-10-18'), parseWhen('within 18 months', '2026-10-18'), parseWhen('by end of this year', '2026-10-18')], ['2027-03-31', '2028-04-18', '2026-12-31']);
+  });
+
   it('the copilot route rejects an unknown /segment', async () => {
     const { z } = await import('zod');
     const { SEGMENT_IDS } = await import('../src/lib/assistant.ts');
@@ -853,7 +871,8 @@ describe('Assistant commands (propose, never write)', () => {
       content: null,
       tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'add_goal', arguments: JSON.stringify({ name: 'Japan trip', target: '3,000', targetDate: '2027-06-01' }) } }],
     });
-    const res = await answerQuestion('create a goal called Japan trip for $3,000 by 2027-06-01', data, { llm });
+    // A follow-up the rules can't read goes to the model; the server still resolves and guards its call.
+    const res = await answerQuestion('Japan trip, $3,000, by 2027-06-01 please', data, { llm }, { followUp: true });
     const arg = res.proposals?.[0]?.args[0] as { targetCents: number; name: string };
     assert.strictEqual(res.proposals?.[0]?.op, 'addGoal');
     assert.strictEqual(arg.targetCents, 300000);

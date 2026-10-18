@@ -1,5 +1,13 @@
+/**
+ * "…add this goal with a plan", "create a goal for a car", "I want to save for a trip": asking for a NEW goal
+ * anywhere in the sentence (not "how is my goal doing?").
+ */
+export const GOAL_INTENT =
+  /\b(?:add|create|make|set up|start|open|new)\b[^.?!]{0,40}\bgoals?\b|\bgoal\s+(?:called|named)\b|\bsav(?:e|ing)\s+(?:up\s+)?(?:for|towards?)\b|\b(?:want|plan|need)\s+to\s+(?:buy|purchase|afford)\b/i;
+
 /** Imperative messages ("add…", "pay…", "delete…") are assistant commands, not questions. Shared by server and the demo chat. */
 export function looksLikeCommand(message: string): boolean {
+  if (GOAL_INTENT.test(message)) return true;
   return /^(?:please\s+|(?:i(?:\s+(?:want|need|would like)|'d like)|let's|can you|could you|help me)\s+(?:to\s+)?)?(?:add|create|new|set|change|update|rename|edit|delete|remove|pay|pause|resume|record|log|contribute|put|move|switch|turn|mark|open|go to|take me|plan)\b/i.test(message.trim());
 }
 

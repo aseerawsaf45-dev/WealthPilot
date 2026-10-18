@@ -11,10 +11,10 @@
 import { z } from 'zod';
 import { formatMoney, dollarsToCents } from '@/lib/money';
 import { ymd, Currency } from '../schemas';
-import type { FinanceData } from './tools';
+import { addMonthsYmd, type FinanceData } from './tools';
 import type { ToolCall } from './router';
 import type { ActionProposal } from '@/types/finance';
-import type { SegmentId } from '@/lib/assistant';
+import { GOAL_INTENT, type SegmentId } from '@/lib/assistant';
 export { looksLikeCommand } from '@/lib/assistant';
 
 export const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'] as const;
@@ -26,7 +26,8 @@ export interface PendingCommand {
   args: Record<string, unknown>;
   field: string;
 }
-type Resolved = { proposal: ActionProposal } | { clarify: string; askAmount?: string; options?: string[]; pending?: PendingCommand };
+/** `then` = a step that runs right after `proposal` and uses what it created (args '$prev'). */
+type Resolved = { proposal: ActionProposal; then?: ActionProposal } | { clarify: string; askAmount?: string; options?: string[]; pending?: PendingCommand };
 
 /** Which argument holds the amount a command asks for when it's missing. */
 const AMOUNT_FIELD: Record<string, string> = {
@@ -140,14 +141,20 @@ export const COMMANDS: CommandDef[] = [
   },
   {
     name: 'add_goal',
-    description: 'Create a savings goal with a target amount and optional deadline.',
-    args: z.object({ name, target: needed, targetDate: ymd.optional() }),
-    resolve: (a: { name: string; target: string; targetDate?: string }, { data, message }) => {
+    description: 'Create a savings goal with a target amount and optional deadline; withPlan=true when the user also wants a plan for it.',
+    args: z.object({ name, target: needed, targetDate: ymd.optional(), withPlan: z.boolean().optional() }),
+    resolve: (a: { name: string; target: string; targetDate?: string; withPlan?: boolean }, { data, message }) => {
       const c = centsFromMessage(a.target, message);
       if (!c) return noAmount('target amount');
-      return propose(`Create goal "${a.name}": save ${money(c, data)}${a.targetDate ? ` by ${a.targetDate}` : ''}`, 'addGoal', [
+      if (a.targetDate && a.targetDate <= data.today) return { clarify: `The deadline ${a.targetDate} has already passed. When do you want to reach "${a.name}"?` };
+      const created = propose(`Create goal "${a.name}": save ${money(c, data)}${a.targetDate ? ` by ${a.targetDate}` : ''}`, 'addGoal', [
         { name: a.name, targetCents: c, currentCents: 0, targetDate: a.targetDate, priority: 'medium', category: 'General', isPaused: false },
-      ]);
+      ]) as { proposal: ActionProposal };
+      if (!a.withPlan) return created;
+      return {
+        ...created,
+        then: { summary: `Make a plan for "${a.name}" from your income and spending, and open Goals`, op: 'planGoal', args: ['$prev'], destructive: false },
+      };
     },
   },
   {
@@ -461,12 +468,78 @@ export function rulesCommand(message: string): ToolCall | null {
   if ((r = m.match(/^pay\s+(?:the\s+|my\s+)?(.+?)(?:\s+bill)?$/i))) return { name: 'pay_bill', args: { name: r[1] } };
   if ((r = m.match(/^plan\s+(?:for\s+)?(?:my\s+|the\s+)?(.+?)(?:\s+goal)?$/i))) return { name: 'plan_goal', args: { name: r[1] } };
   if ((r = m.match(/^(pause|resume)\s+(?:the\s+|my\s+)?(.+?)(?:\s+goal)?$/i))) return { name: `${r[1].toLowerCase()}_goal`, args: { name: r[2] } };
+  // Natural phrasings ("I bought…", "set a budget of $300 for dining", "add my Netflix subscription $15 monthly").
+  const P = String.raw`^(?:please\s+|(?:i(?:\s+(?:want|need|would like)|'d like)|can you|could you|help me)\s+(?:to\s+)?)?`;
+  if ((r = m.match(new RegExp(String.raw`^(?:i\s+)?(?:bought|purchased|got)\s+(?:an?\s+|some\s+|the\s+)?(.+?)\s+(?:for|at)\s+${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?$`, 'i'))))
+    return { name: 'add_transaction', args: { amount: r[2], merchant: r[1], type: 'expense' } };
+  if ((r = m.match(new RegExp(String.raw`^(?:i\s+)?(?:received|got paid|earned|got)\s+${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?\s*(?:from|as|for)?\s*(?:my\s+)?(.*)$`, 'i'))))
+    return { name: 'add_transaction', args: { amount: r[1], merchant: r[2]?.trim() || 'Income', type: 'income' } };
+  if ((r = m.match(new RegExp(String.raw`${P}(?:set|make|create|add)\s+(?:a\s+|my\s+|the\s+)?(?:monthly\s+)?budget\s+(?:of\s+)?${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?\s+(?:for|on)\s+(?:my\s+|the\s+)?(.+?)$`, 'i'))))
+    return { name: 'set_budget', args: { category: r[2], amount: r[1] } };
+  if ((r = m.match(new RegExp(String.raw`${P}(?:set|make|create|add)\s+(?:a\s+|my\s+|the\s+)?(?:monthly\s+)?budget\s+(?:for|on)\s+(?:my\s+|the\s+)?(.+?)\s+(?:of|to|at)\s+${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?$`, 'i'))))
+    return { name: 'set_budget', args: { category: r[1], amount: r[2] } };
+  if ((r = m.match(new RegExp(String.raw`^limit\s+(?:my\s+)?(.+?)\s+(?:spending\s+)?to\s+${AMT}(?:\s*(?:a|per)\s+month)?$`, 'i')))) return { name: 'set_budget', args: { category: r[1], amount: r[2] } };
+  if ((r = m.match(new RegExp(String.raw`${P}add\s+(?:a\s+|my\s+|the\s+)?(?:new\s+)?(?:bill|subscription)\s+(?:for\s+|called\s+)?(.+?)\s+(?:of\s+|for\s+|at\s+)?${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?(?:\s+(?:a|per|every)?\s*(week|month|quarter|year)(?:ly)?)?$`, 'i'))) ||
+      (r = m.match(new RegExp(String.raw`${P}add\s+(?:a\s+|my\s+|the\s+)?(.+?)\s+(?:bill|subscription)\s+(?:of\s+|for\s+|at\s+)?${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?(?:\s+(?:a|per|every)?\s*(week|month|quarter|year)(?:ly)?)?$`, 'i')))) {
+    const freq = { week: 'weekly', month: 'monthly', quarter: 'quarterly', year: 'annual' }[(r[3] ?? 'month').toLowerCase()] ?? 'monthly';
+    return { name: 'add_bill', args: { name: r[1], amount: r[2], frequency: freq } };
+  }
+  if ((r = m.match(/^mark\s+(?:the\s+|my\s+)?(.+?)(?:\s+bill)?\s+(?:as\s+)?paid$/i))) return { name: 'pay_bill', args: { name: r[1] } };
   if ((r = m.match(/^(?:delete|remove)\s+(?:the\s+|my\s+)?(bill|goal|budget|debt|account)\s+(.+)$/i)) || (r = m.match(/^(?:delete|remove)\s+(?:the\s+|my\s+)?(.+?)\s+(bill|goal|budget|debt|account)$/i))) {
     const [kind, target] = /^(bill|goal|budget|debt|account)$/i.test(r[1]) ? [r[1], r[2]] : [r[2], r[1]];
     const k = kind.toLowerCase();
     return { name: `delete_${k}`, args: k === 'budget' ? { category: target } : { name: target } };
   }
   return null;
+}
+
+// ---- Natural-language goals ("I want to buy a car for about 100 usd within next year, add this goal with a plan")
+
+const NUM_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, nine: 9, ten: 10, twelve: 12, eighteen: 18 };
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/** A deadline in plain words → YYYY-MM-DD (end of that month for "by June"), or undefined. */
+export function parseWhen(text: string, today: string): string | undefined {
+  const t = text.toLowerCase();
+  let m: RegExpMatchArray | null;
+  if ((m = t.match(/\b(\d{4}-\d{2}-\d{2})\b/))) return m[1];
+  if ((m = t.match(/\b(?:within|in|over)\s+(?:the\s+)?(?:next\s+)?(\d+|a|an|one|two|three|four|five|six|nine|ten|twelve|eighteen)\s+(month|year)s?\b/))) {
+    const n = /^\d+$/.test(m[1]) ? Number(m[1]) : NUM_WORDS[m[1]];
+    return addMonthsYmd(today, m[2] === 'year' ? n * 12 : n);
+  }
+  if (/\b(?:within\s+(?:the\s+)?)?next\s+year\b|\bin\s+a\s+year\b/.test(t)) return addMonthsYmd(today, 12);
+  if (/\b(?:within\s+(?:the\s+)?)?next\s+month\b/.test(t)) return addMonthsYmd(today, 1);
+  if (/\b(?:by\s+)?(?:the\s+)?end\s+of\s+(?:this|the)\s+year\b|\bthis\s+year\b/.test(t)) return `${today.slice(0, 4)}-12-31`;
+  if ((m = t.match(/\bby\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:\s+(\d{4}))?/))) {
+    const month = MONTHS.indexOf(m[1]) + 1;
+    let year = m[2] ? Number(m[2]) : Number(today.slice(0, 4));
+    if (!m[2] && `${year}-${String(month).padStart(2, '0')}` <= today.slice(0, 7)) year += 1;
+    const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${year}-${String(month).padStart(2, '0')}-${last}`;
+  }
+  return undefined;
+}
+
+const titleCase = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase());
+const STOP = String.raw`(?=\s+(?:which|that|for|by|within|in|next|price|priced|costing|costs?|worth|at|of|around|about|and|with|before|this|so)\b|\s*[,.!?$৳€£]|\s*\d|$)`;
+
+/** A request for a NEW goal anywhere in the sentence → add_goal (amount/date/name parsed; missing amount is asked later). */
+export function goalRequest(message: string, today: string): ToolCall | null {
+  if (!GOAL_INTENT.test(message)) return null;
+  const t = message.replace(/\s+/g, ' ').trim();
+  let m: RegExpMatchArray | null;
+  let goalName: string | undefined;
+  if ((m = t.match(new RegExp(String.raw`\bgoal\s*[:\-–]\s*(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)${STOP}`, 'i')))) goalName = m[1];
+  else if ((m = t.match(new RegExp(String.raw`\bgoal\s+(?:called|named|for)\s+["“']?(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)["”']?${STOP}`, 'i')))) goalName = m[1];
+  else if ((m = t.match(new RegExp(String.raw`\b(?:buy|purchase|afford|get)\s+(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)${STOP}`, 'i')))) goalName = m[1];
+  else if ((m = t.match(new RegExp(String.raw`\bsav(?:e|ing)\s+(?:up\s+)?(?:for|towards?)\s+(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)${STOP}`, 'i')))) goalName = m[1];
+  const amount = t.match(/[$৳€£]\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s*(?:usd|dollars?|bucks|bdt|taka|tk|eur|euros?|gbp|pounds?)\b/i);
+  const targetDate = parseWhen(t, today);
+  const args: Record<string, unknown> = { name: titleCase(goalName ?? 'New goal') };
+  if (amount) args.target = (amount[1] ?? amount[2]).replace(/,/g, '');
+  if (targetDate) args.targetDate = targetDate;
+  if (/\bplan\b/i.test(t)) args.withPlan = true;
+  return { name: 'add_goal', args };
 }
 
 /** Max changes in one plan ("add $12 coffee and pay Spotify", or several model command calls). */
@@ -476,13 +549,13 @@ export const MAX_STEPS = 6;
  * "add $12 coffee and pay Spotify then open bills" → one call per part, but only when EVERY part is a
  * command (so "set Food and groceries budget to $50" stays one command).
  */
-export function rulesCommands(message: string): ToolCall[] | null {
+export function rulesCommands(message: string, today = new Date().toISOString().slice(0, 10)): ToolCall[] | null {
   const parts = message.split(/\s*;\s*|,?\s+(?:and\s+)?then\s+|\s+and\s+/i).filter((p) => p.trim());
   if (parts.length > 1) {
     const calls = parts.map(rulesCommand);
     if (calls.every(Boolean)) return (calls as ToolCall[]).slice(0, MAX_STEPS);
   }
-  const one = rulesCommand(message);
+  const one = rulesCommand(message) ?? goalRequest(message, today);
   return one ? [one] : null;
 }
 
