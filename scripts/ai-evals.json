@@ -269,7 +269,7 @@
         "source": "rules",
         "factCount": 0,
         "answerIncludes": [
-          "read-only"
+          "can't do that"
         ]
       }
     },
@@ -279,7 +279,7 @@
       "expect": {
         "factCount": 0,
         "answerIncludes": [
-          "read-only"
+          "can't do that"
         ]
       }
     },
@@ -289,7 +289,7 @@
       "expect": {
         "factCount": 0,
         "answerIncludes": [
-          "read-only"
+          "can't do that"
         ]
       }
     },
@@ -573,6 +573,31 @@
       },
       "provider": "gemini",
       "expectAllowed": false
+    },
+    {
+      "id": "command-navigate",
+      "question": "open budgets",
+      "expect": {
+        "source": "rules",
+        "tools": [
+          "navigate"
+        ],
+        "answerIncludes": [
+          "Press Confirm"
+        ],
+        "llmCalls": 0
+      }
+    },
+    {
+      "id": "command-freeform-needs-ai",
+      "question": "create a goal called Japan trip for $3,000",
+      "expect": {
+        "source": "rules",
+        "factCount": 0,
+        "answerIncludes": [
+          "With AI turned on"
+        ]
+      }
     }
   ]
 }

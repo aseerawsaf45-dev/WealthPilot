@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import type { ActionProposal } from '@/types/finance';
 
 export const SUGGESTED_ACTIONS = [
   'open_transactions',
@@ -42,4 +43,6 @@ export interface CopilotAnswer extends LlmNarration {
   facts: Fact[];
   limitations: string[];
   source: 'rules' | 'llm:groq' | 'llm:gemini';
+  /** Changes for the user to confirm (assistant commands). */
+  proposals?: ActionProposal[];
 }

@@ -168,6 +168,31 @@ export interface CopilotMessage {
   source?: 'rules' | 'llm:groq';
   insights?: { title: string; description: string }[];
   suggestedActions?: { label: string; action: string }[];
+  /** Changes the assistant prepared; each runs only when the user presses Confirm. */
+  proposals?: ActionProposal[];
+}
+
+/** FinanceContext methods the assistant may call (plus two UI ops). The client checks this list again. */
+export const ASSISTANT_OPS = [
+  'navigate', 'openQuickAdd',
+  'addTransaction', 'updateTransaction', 'deleteTransaction',
+  'addGoal', 'updateGoal', 'deleteGoal', 'contributeToGoal', 'planGoal',
+  'addBudget', 'deleteBudget',
+  'addBill', 'updateBill', 'payBill', 'deleteBill',
+  'addDebt', 'updateDebt', 'deleteDebt',
+  'addAccount', 'updateAccount', 'removeAccount',
+  'setPreferences',
+] as const;
+export type AssistantOp = (typeof ASSISTANT_OPS)[number];
+
+/** A change prepared by the server copilot: `args` are ready for the FinanceContext method `op`. */
+export interface ActionProposal {
+  summary: string;
+  destructive: boolean;
+  op: AssistantOp;
+  args: unknown[];
+  status?: 'done' | 'cancelled' | 'failed';
+  error?: string;
 }
 
 /** What "Apply" does for a contingency option (all through existing actions). */

@@ -13,6 +13,7 @@ import { sanitizePromptInput } from '@/services/copilotService';
 import { LlmNarration, SUGGESTED_ACTIONS, type CopilotAnswer, type Fact } from './schema';
 import { TOOLS, runTool, toolByName, type FinanceData, type ToolOutput } from './tools';
 import { routeIntent, type ToolCall } from './router';
+import { COMMANDS, commandByName, resolveCommand, rulesCommand, looksLikeCommand } from './commands';
 import { redactForLlm } from './privacy';
 import { addDays } from '../mappers';
 import { ProviderError, type LlmClient, type LlmMessage } from './providers';
@@ -26,7 +27,13 @@ export interface AnswerDeps {
 
 export const HELP_TEXT =
   'I can summarise your spending and income, compare periods or categories, check your budgets, list upcoming bills, ' +
-  'track savings goals, summarise your debts, or look for duplicate charges. Try "How much did I spend this month?"';
+  'track savings goals, summarise your debts, or look for duplicate charges. Try "How much did I spend this month?" ' +
+  'I can also make changes for you after you confirm, e.g. "add $12 coffee", "pay Netflix" or "open budgets".';
+
+export const COMMAND_HELP =
+  'I can make these changes for you (you confirm each one): "add $12 coffee", "spent $40 on groceries", "add $200 to Vacation", ' +
+  '"set dining budget to $300", "pay Netflix", "pause Car goal", "plan Car goal", "delete bill Gym" or "open budgets". ' +
+  'With AI turned on in Settings I also understand free-form requests like "create a goal called Japan trip for $3,000 by 2027-06-01".';
 
 const MAX_TOOL_CALLS = 3;
 
@@ -159,8 +166,9 @@ function narrationMessages(question: string, facts: Fact[]): LlmMessage[] {
 }
 
 /** LLM call #1 for questions the router didn't match: the model picks tools; args are Zod-validated later. */
-async function selectTools(llm: LlmClient, question: string, data: FinanceData): Promise<ToolCall[]> {
-  const tools = TOOLS.filter((t) => t.llm).map((t) => ({
+async function selectTools(llm: LlmClient, question: string, data: FinanceData): Promise<{ calls: ToolCall[]; provider?: string }> {
+  // Command tools only extract details from the user's message; the server resolves and the user confirms.
+  const tools = [...TOOLS.filter((t) => t.llm), ...COMMANDS].map((t) => ({
     type: 'function' as const,
     function: { name: t.name, description: t.description, parameters: z.toJSONSchema(t.args, { io: 'input', unrepresentable: 'any' }) },
   }));
@@ -170,13 +178,14 @@ async function selectTools(llm: LlmClient, question: string, data: FinanceData):
         role: 'system',
         content:
           `You choose which WealthPilot calculations answer the user's question. Today is ${data.today}; the user's currency is ${data.currency}. ` +
-          `Call at most ${MAX_TOOL_CALLS} tools. Dates are YYYY-MM-DD; money is integer minor units. If no tool fits, call none.`,
+          `Call at most ${MAX_TOOL_CALLS} tools. Dates are YYYY-MM-DD; money is integer minor units. If no tool fits, call none. ` +
+          'If the user asks to change something, call the matching command tool, copying names and amounts exactly as the user wrote them; never make up an amount.',
       },
       { role: 'user', content: redactForLlm(question) },
     ],
     tools,
   });
-  return (msg.tool_calls ?? []).slice(0, MAX_TOOL_CALLS).map((c) => {
+  const calls = (msg.tool_calls ?? []).slice(0, MAX_TOOL_CALLS).map((c) => {
     let args: Record<string, unknown> = {};
     try {
       args = JSON.parse(c.function.arguments || '{}');
@@ -185,6 +194,7 @@ async function selectTools(llm: LlmClient, question: string, data: FinanceData):
     }
     return { name: c.function.name, args };
   });
+  return { calls, provider: msg.provider };
 }
 
 /**
@@ -236,22 +246,39 @@ export async function answerQuestion(
     );
 
   const safety = sanitizePromptInput(message);
-  if (!safety.isSafe) return plain("I can only answer read-only questions about your own finances, so I can't act on that request.");
+  if (!safety.isSafe) return plain("I can't do that.");
   const question = safety.sanitized;
+
+  // Commands become proposals the user confirms in the app; nothing is written here.
+  const commandAnswer = (cmds: ToolCall[], source: CopilotAnswer['source']) => {
+    const resolved = cmds.slice(0, MAX_TOOL_CALLS).map((c) => resolveCommand(c, data, question));
+    const proposals = resolved.flatMap((r) => ('proposal' in r ? [r.proposal] : []));
+    const clarify = resolved.flatMap((r) => ('clarify' in r ? [r.clarify] : []));
+    const lead = proposals.length === 1 ? "Here's the change I prepared. Press Confirm to save it." : proposals.length ? 'Here are the changes I prepared. Confirm each one to save it.' : '';
+    return { ...finish({ answer: [lead, ...clarify].filter(Boolean).join(' '), insights: [], suggested_actions: [] }, source, undefined, cmds.map((c) => c.name)), proposals };
+  };
+  const ruled = !opts.calls && rulesCommand(question);
+  if (ruled) return commandAnswer([ruled], 'rules');
+  const commandish = !opts.calls && looksLikeCommand(question);
 
   const categories = [
     ...data.transactions.flatMap((t) => [t.category, ...(t.splits ?? []).map((s) => s.category)]),
     ...data.budgets.map((b) => b.category),
   ];
-  let calls = opts.calls ?? routeIntent(question, data.today, categories);
+  let calls = opts.calls ?? (commandish ? null : routeIntent(question, data.today, categories));
   const llmPicked = !calls;
   if (!calls) {
-    if (!deps.llm) return plain(HELP_TEXT);
+    const help = commandish ? COMMAND_HELP : HELP_TEXT;
+    if (!deps.llm) return plain(help);
     try {
-      calls = await selectTools(deps.llm, question, data);
+      const picked = await selectTools(deps.llm, question, data);
+      calls = picked.calls;
+      const cmds = calls.filter((c) => commandByName(c.name));
+      if (cmds.length) return commandAnswer(cmds, picked.provider === 'gemini' ? 'llm:gemini' : 'llm:groq');
+      if (commandish && !calls.length) return plain(help);
     } catch (e) {
       providerFailed(e);
-      return plain(HELP_TEXT);
+      return plain(help);
     }
     if (calls.some((c) => clampModelDates(c.args, data.today))) {
       limitations.push('The requested dates were outside your recorded history, so this shows this month so far.');

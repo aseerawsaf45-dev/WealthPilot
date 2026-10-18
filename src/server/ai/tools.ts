@@ -19,6 +19,7 @@ export interface FinanceData {
   today: string; // YYYY-MM-DD in the user's timezone
   currency: string; // preferred currency; category/budget figures use this currency only
   transactions: {
+    id?: string; // ids (here and below) are server-side only, never sent to a model
     financialDate: string;
     amountCents: number;
     category: string;
@@ -27,10 +28,11 @@ export interface FinanceData {
     merchant: string;
     splits?: { category: string; amountCents: number }[];
   }[];
-  budgets: { category: string; allocatedCents: number; alertThresholdPercent: number; monthYear: string }[];
+  budgets: { id?: string; category: string; allocatedCents: number; alertThresholdPercent: number; monthYear: string }[];
   goals: { id?: string; name: string; targetCents: number; currentCents: number; targetDate: string | null; isPaused: boolean }[]; // id: server-side only, never sent to a model
-  bills: { name: string; amountCents: number; nextDueDate: string; status: string }[];
-  debts: { name: string; balanceCents: number; aprPercent: number; minimumPaymentCents: number }[];
+  bills: { id?: string; name: string; amountCents: number; nextDueDate: string; status: string }[];
+  debts: { id?: string; name: string; balanceCents: number; aprPercent: number; minimumPaymentCents: number }[];
+  accounts?: { id: string; name: string }[]; // only for resolving assistant commands
 }
 
 export interface Period {

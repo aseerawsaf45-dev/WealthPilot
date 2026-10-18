@@ -685,6 +685,86 @@ describe('AI privacy gateway', () => {
   });
 });
 
+describe('Assistant commands (propose, never write)', () => {
+  const data = {
+    today: '2026-10-18',
+    currency: 'USD',
+    transactions: [
+      { id: 'tx2', financialDate: '2026-10-15', amountCents: -650, category: 'Dining', currency: 'USD', isTransfer: false, merchant: 'Starbucks Coffee' },
+      { id: 'tx1', financialDate: '2026-10-01', amountCents: -500, category: 'Dining', currency: 'USD', isTransfer: false, merchant: 'Starbucks Coffee' },
+    ],
+    budgets: [{ id: 'b1', category: 'Dining', allocatedCents: 30000, alertThresholdPercent: 80, monthYear: '2026-10' }],
+    goals: [
+      { id: 'g1', name: 'Car Fund', targetCents: 500000, currentCents: 10000, targetDate: null, isPaused: false },
+      { id: 'g2', name: 'Car Repairs', targetCents: 100000, currentCents: 0, targetDate: null, isPaused: false },
+      { id: 'g3', name: 'Vacation', targetCents: 300000, currentCents: 0, targetDate: null, isPaused: false },
+    ],
+    bills: [{ id: 'bill1', name: 'Netflix', amountCents: 1599, nextDueDate: '2026-10-20', status: 'active' }],
+    debts: [],
+    accounts: [{ id: 'acc1', name: 'Checking' }],
+  };
+
+  it('parses common commands without AI', async () => {
+    const { rulesCommand } = await import('../src/server/ai/commands.ts');
+    assert.deepStrictEqual(rulesCommand('open budgets'), { name: 'navigate', args: { tab: 'budgets' } });
+    assert.deepStrictEqual(rulesCommand('add $12 coffee'), { name: 'add_transaction', args: { amount: '12', merchant: 'coffee', type: 'expense' } });
+    assert.deepStrictEqual(rulesCommand('add $200 to Vacation'), { name: 'contribute_goal', args: { amount: '200', name: 'Vacation' } });
+    assert.deepStrictEqual(rulesCommand('set dining budget to $300'), { name: 'set_budget', args: { category: 'dining', amount: '300' } });
+    assert.deepStrictEqual(rulesCommand('pay Netflix'), { name: 'pay_bill', args: { name: 'Netflix' } });
+    assert.deepStrictEqual(rulesCommand('pause Vacation goal'), { name: 'pause_goal', args: { name: 'Vacation' } });
+    assert.deepStrictEqual(rulesCommand('delete bill Netflix'), { name: 'delete_bill', args: { name: 'Netflix' } });
+    assert.strictEqual(rulesCommand('How much did I spend this month?'), null);
+  });
+
+  it('resolves to integer-cent proposals with ids only from the user data', async () => {
+    const { resolveCommand } = await import('../src/server/ai/commands.ts');
+    const add = resolveCommand({ name: 'add_transaction', args: { amount: '12.50', merchant: 'Coffee' } }, data, 'add $12.50 coffee');
+    assert.ok('proposal' in add);
+    assert.strictEqual(add.proposal.op, 'addTransaction');
+    assert.strictEqual((add.proposal.args[0] as { amountCents: number; accountId: string }).amountCents, -1250);
+    assert.strictEqual((add.proposal.args[0] as { accountId: string }).accountId, 'acc1');
+    const pay = resolveCommand({ name: 'pay_bill', args: { name: 'netflix' } }, data, 'pay netflix');
+    assert.ok('proposal' in pay && pay.proposal.op === 'payBill' && pay.proposal.args[0] === 'bill1' && !pay.proposal.destructive);
+    const del = resolveCommand({ name: 'delete_transaction', args: { merchant: 'starbucks' } }, data, 'delete my starbucks transaction');
+    assert.ok('proposal' in del && del.proposal.destructive && del.proposal.args[0] === 'tx2', 'most recent match, flagged destructive');
+  });
+
+  it('asks instead of guessing: invented amounts, ambiguous or unknown names', async () => {
+    const { resolveCommand } = await import('../src/server/ai/commands.ts');
+    const invented = resolveCommand({ name: 'contribute_goal', args: { name: 'Vacation', amount: '500' } }, data, 'put some money in my vacation goal');
+    assert.ok('clarify' in invented, 'an amount the user never wrote is rejected');
+    const ambiguous = resolveCommand({ name: 'pause_goal', args: { name: 'car' } }, data, 'pause car');
+    assert.ok('clarify' in ambiguous && ambiguous.clarify.includes('Car Fund') && ambiguous.clarify.includes('Car Repairs'));
+    const unknown = resolveCommand({ name: 'pay_bill', args: { name: 'Gym' } }, data, 'pay Gym');
+    assert.ok('clarify' in unknown && unknown.clarify.includes('Netflix'));
+  });
+
+  it('answerQuestion returns proposals and calls no model or write for a ruled command', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    let calls = 0;
+    const res = await answerQuestion('pay Netflix', data, { llm: async () => ((calls += 1), { role: 'assistant', content: '{}' }) });
+    assert.strictEqual(calls, 0);
+    assert.strictEqual(res.proposals?.length, 1);
+    assert.ok(res.proposals![0].summary.includes('$15.99'));
+    const help = await answerQuestion('create a goal called Japan trip for $3,000', data, { llm: null });
+    assert.ok(!help.proposals?.length && help.answer.includes('With AI turned on'), 'free-form commands need AI; nothing is guessed');
+  });
+
+  it('a model-extracted command is resolved by the server, with the amount guard', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const llm = async () => ({
+      role: 'assistant' as const,
+      content: null,
+      tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'add_goal', arguments: JSON.stringify({ name: 'Japan trip', target: '3,000', targetDate: '2027-06-01' }) } }],
+    });
+    const res = await answerQuestion('create a goal called Japan trip for $3,000 by 2027-06-01', data, { llm });
+    const arg = res.proposals?.[0]?.args[0] as { targetCents: number; name: string };
+    assert.strictEqual(res.proposals?.[0]?.op, 'addGoal');
+    assert.strictEqual(arg.targetCents, 300000);
+    assert.strictEqual(arg.name, 'Japan trip');
+  });
+});
+
 describe('CSRF origin check', () => {
   it('allows same-host browsers on any dev host, blocks cross-site', async () => {
     const { assertSameOrigin } = await import('../src/server/http.ts');

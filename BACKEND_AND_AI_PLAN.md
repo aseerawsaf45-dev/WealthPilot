@@ -507,6 +507,7 @@ Vertical slices in this order, each following the `wealthpilot-api-route` skill:
 - [ ] **OPS-06** Run `/security-review` and `engineering:deploy-checklist`; fix findings
 - [ ] **OPS-07** Venue rehearsal on a China network (§11 M10); offline rules mode; backup demo video
 - [ ] *(optional)* **AI-08** GLM-4-Flash provider for `region = CN`
+- [x] **AI-09** Assistant with app control (2026-10-18): floating panel on every tab (`AssistantPanel`, `/` key) reusing the copilot chat. `src/server/ai/commands.ts` turns commands (rules parser, or the model extracting args from the user's own message) into `ActionProposal`s resolved against the session user's data; amounts must appear in the message. Nothing writes server-side: the client runs a proposal through the existing FinanceContext action only after Confirm. AI consent, sign-out and account deletion are excluded.
 
 ---
 

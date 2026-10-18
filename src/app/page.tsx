@@ -13,6 +13,7 @@ import { PlanningTab } from '../components/PlanningTab';
 import { LearnTab } from '../components/LearnTab';
 import { ImportTab } from '../components/ImportTab';
 import { CopilotTab } from '../components/CopilotTab';
+import { AssistantPanel } from '../components/AssistantPanel';
 import { SettingsTab } from '../components/SettingsTab';
 import { LandingPage } from '../components/LandingPage';
 import { AuthModal } from '../components/AuthModal';
@@ -33,6 +34,7 @@ function WealthPilotApp() {
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
   const { accounts, addTransaction, preferences, isReady, syncError, clearSyncError } = useFinance();
 
@@ -141,6 +143,10 @@ function WealthPilotApp() {
       else if (e.key === '9') setActiveTab('import');
       else if (e.key === '0') setActiveTab('settings');
       else if (e.key === 'n' || e.key === 'N') setIsQuickAddOpen(true);
+      else if (e.key === '/') {
+        e.preventDefault();
+        setIsAssistantOpen(true);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -235,7 +241,7 @@ function WealthPilotApp() {
             {activeTab === 'bills' && <BillsTab />}
             {activeTab === 'planning' && <PlanningTab />}
             {activeTab === 'learn' && <LearnTab />}
-            {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} />}
+            {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} onOpenQuickAdd={() => setIsQuickAddOpen(true)} />}
             {activeTab === 'import' && <ImportTab />}
             {activeTab === 'settings' && <SettingsTab />}
           </div>
@@ -393,6 +399,22 @@ function WealthPilotApp() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Floating assistant on every tab (the Copilot tab already shows the same chat) */}
+      {isReady && activeTab !== 'copilot' && (
+        <AssistantPanel
+          open={isAssistantOpen}
+          onOpenChange={setIsAssistantOpen}
+          onNavigate={(tab) => {
+            setActiveTab(tab);
+            setIsAssistantOpen(false);
+          }}
+          onOpenQuickAdd={() => {
+            setIsAssistantOpen(false);
+            setIsQuickAddOpen(true);
+          }}
+        />
       )}
 
       {/* Auth Modal for Sign In / Sign Up */}
