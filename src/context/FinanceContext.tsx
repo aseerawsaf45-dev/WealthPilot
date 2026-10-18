@@ -98,7 +98,8 @@ interface FinanceContextType {
   resetToDemoData: () => void;
   clearAllUserData: (password?: string) => Promise<boolean>;
   addCopilotMessage: (msg: CopilotMessage) => void;
-  updateCopilotMessage: (id: string, patch: Partial<CopilotMessage>) => void;
+  /** A function patch sees the latest message, so sequential updates (e.g. a plan's steps) don't overwrite each other. */
+  updateCopilotMessage: (id: string, patch: Partial<CopilotMessage> | ((m: CopilotMessage) => Partial<CopilotMessage>)) => void;
   clearCopilotHistory: () => void;
   login: (email: string, password: string) => Promise<void>;
   signup: (name: string, email: string, password: string, preferredCurrency?: string) => Promise<void>;
@@ -678,8 +679,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setCopilotHistory((prev) => [...prev, msg]);
   };
 
-  const updateCopilotMessage = (id: string, patch: Partial<CopilotMessage>) => {
-    setCopilotHistory((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  const updateCopilotMessage = (id: string, patch: Partial<CopilotMessage> | ((m: CopilotMessage) => Partial<CopilotMessage>)) => {
+    setCopilotHistory((prev) => prev.map((m) => (m.id === id ? { ...m, ...(typeof patch === 'function' ? patch(m) : patch) } : m)));
   };
 
   const clearCopilotHistory = () => {

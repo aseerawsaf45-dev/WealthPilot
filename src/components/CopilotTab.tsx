@@ -6,7 +6,7 @@ import { executeCopilotQuery } from '../services/copilotService';
 import { api } from '../lib/api';
 import { formatFact } from '../lib/money';
 import { AiConsentDialog } from './AiConsentDialog';
-import { looksLikeCommand } from '../lib/assistant';
+import { looksLikeCommand, parseScope, SEGMENTS } from '../lib/assistant';
 import { ASSISTANT_OPS, type ActionProposal, type CopilotFact, type CopilotMessage } from '../types/finance';
 import {
   Sparkles,
@@ -73,8 +73,19 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
   const [isProcessing, setIsProcessing] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
   const [runningKey, setRunningKey] = useState<string | null>(null);
+  const [menuIndex, setMenuIndex] = useState(0);
+  // "/" at the start of the input opens the segment menu, filtered by what follows it.
+  const slashQuery = /^\/[a-z]*$/i.test(inputQuery) ? inputQuery.slice(1).toLowerCase() : null;
+  const segmentOptions = slashQuery === null ? [] : SEGMENTS.filter((seg) => seg.id.startsWith(slashQuery));
+  const pickSegment = (id: string) => {
+    setInputQuery(`/${id} `);
+    setMenuIndex(0);
+  };
   const threadEnd = useRef<HTMLDivElement>(null);
-  useEffect(() => threadEnd.current?.scrollIntoView({ block: 'end' }), [copilotHistory.length, isProcessing]);
+  // Braces matter: newer Chrome's scrollIntoView returns a Promise, and an effect must return nothing or a cleanup.
+  useEffect(() => {
+    threadEnd.current?.scrollIntoView({ block: 'end' });
+  }, [copilotHistory.length, isProcessing]);
   const isSignedIn = preferences.isAuthenticated === true;
   // Signed in, the server answers with calculations even when AI wording is off.
   const canAsk = isSignedIn || preferences.isAiEnabled;
@@ -90,6 +101,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
   const handleSend = async (queryToSend?: string) => {
     const text = queryToSend || inputQuery;
     if (!text.trim() || isProcessing || !canAsk) return;
+    const { scope, text: question } = parseScope(text);
 
     // 1. Append user message
     const userMsg = {
@@ -106,7 +118,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
       // 2a. Server copilot: numbers are calculated server-side from your saved data.
       let reply: CopilotMessage;
       try {
-        const res = await api.post<ServerAnswer>('/ai/copilot', { message: text.trim() });
+        const res = await api.post<ServerAnswer>('/ai/copilot', { message: question, ...(scope && { scope }) });
         reply = {
           id: messageId('copilot'),
           sender: 'assistant',
@@ -134,12 +146,18 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
 
     // 2b. Demo mode (signed out): local deterministic engine over the demo data (read-only).
     setTimeout(() => {
-      if (looksLikeCommand(text)) {
+      const seg = scope && SEGMENTS.find((x) => x.id === scope);
+      if (seg && !question) {
+        addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content: `Things I can do in ${seg.label} once you sign in: ${seg.examples.map((e) => `"${e}"`).join(', ')}.` });
+        setIsProcessing(false);
+        return;
+      }
+      if (looksLikeCommand(question)) {
         addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content: 'Sign in to let the assistant make changes. In demo mode I can answer questions about the sample data.' });
         setIsProcessing(false);
         return;
       }
-      const response = executeCopilotQuery(text, {
+      const response = executeCopilotQuery(question, {
         accounts,
         transactions,
         budgets,
@@ -153,11 +171,9 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
     }, 400);
   };
 
-  /** Runs a confirmed proposal through the same FinanceContext action the app's own buttons use. */
-  const runProposal = async (msg: CopilotMessage, index: number, p: ActionProposal) => {
-    const key = `${msg.id}:${index}`;
-    if (runningKey || p.status || !(ASSISTANT_OPS as readonly string[]).includes(p.op)) return;
-    setRunningKey(key);
+  /** Runs one proposal through the same FinanceContext action the app's own buttons use. Returns an error message, if any. */
+  const execute = async (p: ActionProposal): Promise<string | undefined> => {
+    if (!(ASSISTANT_OPS as readonly string[]).includes(p.op)) return 'Unknown action.';
     let error: string | undefined;
     try {
       if (p.op === 'navigate') onNavigate?.(String(p.args[0]));
@@ -176,12 +192,23 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
     } catch (e) {
       error = e instanceof Error ? e.message : 'That change could not be saved.';
     }
-    const status: ActionProposal['status'] = error ? 'failed' : 'done';
-    updateCopilotMessage(msg.id, { proposals: msg.proposals?.map((q, j) => (j === index ? { ...q, status, error } : q)) });
+    return error;
+  };
+  const setStep = (msgId: string, index: number, patch: Partial<ActionProposal>) =>
+    updateCopilotMessage(msgId, (m) => ({ proposals: m.proposals?.map((q, j) => (j === index ? { ...q, ...patch } : q)) }));
+  /** Runs the given steps in order; stops at the first failure and leaves the rest pending. */
+  const runSteps = async (msg: CopilotMessage, indices: number[]) => {
+    if (runningKey) return;
+    for (const i of indices) {
+      const p = msg.proposals?.[i];
+      if (!p || p.status) continue;
+      setRunningKey(`${msg.id}:${i}`);
+      const error = await execute(p);
+      setStep(msg.id, i, { status: error ? 'failed' : 'done', error });
+      if (error) break;
+    }
     setRunningKey(null);
   };
-  const cancelProposal = (msg: CopilotMessage, index: number) =>
-    updateCopilotMessage(msg.id, { proposals: msg.proposals?.map((q, j) => (j === index ? { ...q, status: 'cancelled' as const } : q)) });
 
   return (
     <div className={compact ? 'flex h-full min-h-0 flex-col gap-3' : 'space-y-6 max-w-4xl mx-auto'}>
@@ -272,7 +299,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
           <div className="space-y-2 text-xs text-slate-600">
             <p className="font-semibold text-slate-800">Ask for advice, or tell me what to change.</p>
             <div className="flex flex-wrap gap-1.5">
-              {['How much did I spend this month?', 'add $12 coffee', 'set dining budget to $300', 'open budgets', 'Compare debt payoff options'].map((q) => (
+              {['How much did I spend this month?', 'add $12 coffee and open transactions', 'set dining budget to $300', '/goals', 'Compare debt payoff options'].map((q) => (
                 <button key={q} onClick={() => handleSend(q)} className="px-2.5 py-1 rounded-full bg-white hover:bg-sky-50 border border-slate-200 text-[11px] font-medium cursor-pointer">
                   {q}
                 </button>
@@ -304,20 +331,39 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
                 <p>{msg.content}</p>
 
                 {/* Prepared changes: nothing is saved until Confirm */}
+                {!isUser && msg.proposals && msg.proposals.length > 1 && (() => {
+                  const pending = msg.proposals.flatMap((q, j) => (q.status ? [] : [j]));
+                  const hasDelete = pending.some((j) => msg.proposals![j].destructive);
+                  return (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sky-50 border border-sky-200 px-3 py-2">
+                      <span className="font-bold text-sky-950">Plan · {msg.proposals.length} steps</span>
+                      {pending.length > 0 && (
+                        <button
+                          onClick={() => runSteps(msg, pending)}
+                          disabled={!!runningKey}
+                          className={`px-3 py-1.5 rounded-full text-[11px] font-bold text-white cursor-pointer disabled:opacity-50 ${hasDelete ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0F172A] hover:bg-neutral-800'}`}
+                        >
+                          {runningKey?.startsWith(`${msg.id}:`) ? 'Running…' : `Run all ${pending.length}${hasDelete ? ' (includes a delete)' : ''}`}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {!isUser && msg.proposals && msg.proposals.length > 0 && (
-                  <ul className="space-y-2" aria-label="Changes to confirm">
+                  <ol className="space-y-2" aria-label="Changes to confirm">
                     {msg.proposals.map((p, i) => {
                       const running = runningKey === `${msg.id}:${i}`;
                       return (
                         <li key={i} className={`wp-pop rounded-xl border p-3 bg-white ${p.destructive && !p.status ? 'border-rose-300' : 'border-slate-200'}`}>
                           <p className={`flex items-start gap-1.5 font-semibold ${p.destructive ? 'text-rose-900' : 'text-slate-900'}`}>
+                            {msg.proposals!.length > 1 && <span className="shrink-0 font-mono text-slate-400">{i + 1}.</span>}
                             {p.destructive && <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px text-rose-600" aria-label="Cannot be undone" />}
                             {p.summary}
                           </p>
                           {!p.status ? (
                             <div className="mt-2 flex gap-2">
                               <button
-                                onClick={() => runProposal(msg, i, p)}
+                                onClick={() => runSteps(msg, [i])}
                                 disabled={!!runningKey}
                                 className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-bold text-white cursor-pointer disabled:opacity-50 ${p.destructive ? 'bg-rose-600 hover:bg-rose-700' : 'bg-[#0F172A] hover:bg-neutral-800'}`}
                               >
@@ -325,23 +371,23 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
                                 {running ? 'Saving…' : p.destructive ? 'Confirm delete' : 'Confirm'}
                               </button>
                               <button
-                                onClick={() => cancelProposal(msg, i)}
+                                onClick={() => setStep(msg.id, i, { status: 'cancelled' })}
                                 disabled={running}
                                 className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-slate-200 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
                               >
                                 <X className="w-3 h-3" />
-                                Cancel
+                                {msg.proposals!.length > 1 ? 'Skip' : 'Cancel'}
                               </button>
                             </div>
                           ) : (
                             <p role="status" className={`mt-1.5 text-[11px] font-semibold ${p.status === 'done' ? 'text-emerald-700' : p.status === 'failed' ? 'text-rose-700' : 'text-slate-500'}`}>
-                              {p.status === 'done' ? '✓ Done' : p.status === 'failed' ? `Not saved: ${p.error}` : 'Cancelled'}
+                              {p.status === 'done' ? '✓ Done' : p.status === 'failed' ? `Not saved: ${p.error}` : msg.proposals!.length > 1 ? 'Skipped' : 'Cancelled'}
                             </p>
                           )}
                         </li>
                       );
                     })}
-                  </ul>
+                  </ol>
                 )}
 
                 {/* Server answer: insights, facts (the only source of numbers), limitations, actions */}
@@ -436,11 +482,53 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false }: Copi
         }}
         className="relative"
       >
+        {segmentOptions.length > 0 && (
+          <ul
+            id="wp-segment-menu"
+            role="listbox"
+            aria-label="Pick what you need help with"
+            className="wp-pop absolute bottom-full left-0 mb-2 w-64 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl z-10"
+          >
+            {segmentOptions.map((seg, i) => (
+              <li key={seg.id} role="option" aria-selected={i === menuIndex}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pickSegment(seg.id)}
+                  className={`w-full rounded-xl px-3 py-2 text-left text-xs cursor-pointer ${i === menuIndex ? 'bg-sky-50 text-sky-900' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span className="font-mono font-semibold">/{seg.id}</span>
+                  <span className="block text-[10px] text-slate-500 truncate">{seg.examples[0]}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <input
           type="text"
-          placeholder={compact ? 'Ask a question or say what to change…' : 'Ask Copilot a question, or tell it what to change...'}
+          placeholder={compact ? 'Ask, say what to change, or type / for a section…' : 'Ask Copilot a question, tell it what to change, or type / to pick a section...'}
           value={inputQuery}
-          onChange={(e) => setInputQuery(e.target.value)}
+          onChange={(e) => {
+            setInputQuery(e.target.value);
+            setMenuIndex(0);
+          }}
+          onKeyDown={(e) => {
+            if (!segmentOptions.length) return;
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              setMenuIndex((i) => (i + (e.key === 'ArrowDown' ? 1 : segmentOptions.length - 1)) % segmentOptions.length);
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+              e.preventDefault();
+              pickSegment(segmentOptions[Math.min(menuIndex, segmentOptions.length - 1)].id);
+            } else if (e.key === 'Escape') {
+              e.stopPropagation(); // closes the menu, not the assistant panel
+              setInputQuery('');
+            }
+          }}
+          role="combobox"
+          aria-expanded={segmentOptions.length > 0}
+          aria-controls="wp-segment-menu"
+          aria-autocomplete="list"
           disabled={!canAsk || isProcessing}
           aria-label="Ask the copilot a question"
           maxLength={500}

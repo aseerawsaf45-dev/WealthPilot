@@ -750,6 +750,41 @@ describe('Assistant commands (propose, never write)', () => {
     assert.ok(!help.proposals?.length && help.answer.includes('With AI turned on'), 'free-form commands need AI; nothing is guessed');
   });
 
+  it('splits compound requests into a plan only when every part is a command', async () => {
+    const { rulesCommands, MAX_STEPS } = await import('../src/server/ai/commands.ts');
+    assert.deepStrictEqual(rulesCommands('add $12 coffee and pay Netflix then open bills')?.map((c) => c.name), ['add_transaction', 'pay_bill', 'navigate']);
+    assert.deepStrictEqual(rulesCommands('set Food and groceries budget to $50'), [{ name: 'set_budget', args: { category: 'Food and groceries', amount: '50' } }]);
+    assert.strictEqual(rulesCommands('add $5 tea; add $6 tea; add $7 tea; add $8 tea; add $9 tea; add $10 tea; add $11 tea')?.length, MAX_STEPS);
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const res = await answerQuestion('pay Netflix and pause Vacation goal', data, { llm: null });
+    assert.strictEqual(res.proposals?.length, 2);
+    assert.ok(res.answer.includes('plan (2 steps)'));
+  });
+
+  it('a /segment alone gives that segment overview without AI; with text it narrows the tools offered', async () => {
+    const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
+    const { parseScope } = await import('../src/lib/assistant.ts');
+    assert.deepStrictEqual(parseScope('/goals plan my car'), { scope: 'goals', text: 'plan my car' });
+    assert.deepStrictEqual(parseScope('/nope hi'), { text: '/nope hi' });
+    let calls = 0;
+    const overview = await answerQuestion('', data, { llm: async () => ((calls += 1), { role: 'assistant', content: '{}' }) }, { scope: 'bills' });
+    assert.strictEqual(calls, 0);
+    assert.deepStrictEqual(overview.tools, ['get_upcoming_bills']);
+    assert.ok(overview.answer.includes('Things I can do in Bills'));
+    let offered: string[] = [];
+    await answerQuestion('what should I do about these', data, {
+      llm: async (req: { tools?: { function: { name: string } }[] }) => ((offered = (req.tools ?? []).map((t) => t.function.name)), { role: 'assistant', content: null, tool_calls: [] }),
+    } as never, { scope: 'bills' });
+    assert.deepStrictEqual(offered.sort(), ['add_bill', 'delete_bill', 'get_upcoming_bills', 'navigate', 'pay_bill', 'update_bill']);
+  });
+
+  it('the copilot route rejects an unknown /segment', async () => {
+    const { z } = await import('zod');
+    const { SEGMENT_IDS } = await import('../src/lib/assistant.ts');
+    assert.strictEqual(z.enum(SEGMENT_IDS).safeParse('admin').success, false);
+    assert.strictEqual(z.enum(SEGMENT_IDS).safeParse('goals').success, true);
+  });
+
   it('a model-extracted command is resolved by the server, with the amount guard', async () => {
     const { answerQuestion } = await import('../src/server/ai/orchestrator.ts');
     const llm = async () => ({

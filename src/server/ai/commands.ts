@@ -14,6 +14,7 @@ import { ymd, Currency } from '../schemas';
 import type { FinanceData } from './tools';
 import type { ToolCall } from './router';
 import type { ActionProposal } from '@/types/finance';
+import type { SegmentId } from '@/lib/assistant';
 export { looksLikeCommand } from '@/lib/assistant';
 
 export const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'] as const;
@@ -429,3 +430,40 @@ export function rulesCommand(message: string): ToolCall | null {
   }
   return null;
 }
+
+/** Max changes in one plan ("add $12 coffee and pay Spotify", or several model command calls). */
+export const MAX_STEPS = 6;
+
+/**
+ * "add $12 coffee and pay Spotify then open bills" → one call per part, but only when EVERY part is a
+ * command (so "set Food and groceries budget to $50" stays one command).
+ */
+export function rulesCommands(message: string): ToolCall[] | null {
+  const parts = message.split(/\s*;\s*|,?\s+(?:and\s+)?then\s+|\s+and\s+/i).filter((p) => p.trim());
+  if (parts.length > 1) {
+    const calls = parts.map(rulesCommand);
+    if (calls.every(Boolean)) return (calls as ToolCall[]).slice(0, MAX_STEPS);
+  }
+  const one = rulesCommand(message);
+  return one ? [one] : null;
+}
+
+// ---- Segments ("/goals …" in the chat) ------------------------------------------
+
+const monthToDate = (today: string): ToolCall => ({ name: 'get_financial_summary', args: { from: `${today.slice(0, 7)}-01`, to: today } });
+const GOAL_CMDS = ['add_goal', 'update_goal', 'contribute_goal', 'pause_goal', 'resume_goal', 'delete_goal', 'plan_goal'];
+const DEBT_CMDS = ['add_debt', 'update_debt', 'delete_debt'];
+
+/** What each segment offers the model (navigate is always allowed) and the calculation its overview shows. */
+export const SEGMENT_TOOLS: Record<SegmentId, { read: string[]; commands: string[]; overview?: (today: string) => ToolCall }> = {
+  overview: { read: ['get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: COMMANDS.map((c) => c.name), overview: monthToDate },
+  transactions: { read: ['get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: ['add_transaction', 'recategorize_transaction', 'delete_transaction', 'open_quick_add'], overview: monthToDate },
+  accounts: { read: ['get_financial_summary'], commands: ['add_account', 'rename_account', 'delete_account'] },
+  budgets: { read: ['get_budget_status', 'get_category_breakdown'], commands: ['set_budget', 'delete_budget'], overview: (t) => ({ name: 'get_budget_status', args: { month: t.slice(0, 7) } }) },
+  goals: { read: ['calculate_savings_plan', 'plan_goal'], commands: GOAL_CMDS, overview: () => ({ name: 'calculate_savings_plan', args: {} }) },
+  bills: { read: ['get_upcoming_bills'], commands: ['add_bill', 'update_bill', 'pay_bill', 'delete_bill'], overview: () => ({ name: 'get_upcoming_bills', args: { days: 30 } }) },
+  debts: { read: ['get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'get_debt_summary', args: {} }) },
+  planning: { read: ['get_debt_summary', 'calculate_savings_plan', 'plan_goal'], commands: [...DEBT_CMDS, ...GOAL_CMDS], overview: () => ({ name: 'get_debt_summary', args: {} }) },
+  import: { read: ['get_financial_summary'], commands: ['open_quick_add'] },
+  settings: { read: [], commands: ['update_preferences'] },
+};

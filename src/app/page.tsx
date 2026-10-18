@@ -28,6 +28,8 @@ import {
   Globe,
 } from 'lucide-react';
 
+const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'];
+
 function WealthPilotApp() {
   const [viewMode, setViewMode] = useState<'landing' | 'app'>('landing');
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -67,8 +69,10 @@ function WealthPilotApp() {
   useEffect(() => {
     const syncFromHash = () => {
       if (typeof window !== 'undefined') {
-        if (window.location.hash === '#app') {
+        const [view, tab] = window.location.hash.slice(1).split('/');
+        if (view === 'app') {
           setViewMode('app');
+          if (tab && TABS.includes(tab)) setActiveTab(tab);
         } else if (window.location.hash === '#landing') {
           setViewMode('landing');
         }
@@ -79,6 +83,16 @@ function WealthPilotApp() {
     window.addEventListener('hashchange', syncFromHash);
     return () => window.removeEventListener('hashchange', syncFromHash);
   }, []);
+
+  // The open tab lives in the URL (#app/goals), so Reload and Back return to it instead of Overview.
+  useEffect(() => {
+    if (viewMode !== 'app') return;
+    const target = `#app/${activeTab}`;
+    if (window.location.hash === target) return;
+    if (window.location.hash.startsWith('#app/')) window.history.pushState(null, '', target);
+    else window.history.replaceState(null, '', target);
+    window.scrollTo({ top: 0 });
+  }, [activeTab, viewMode]);
 
   const handleSetViewMode = (mode: 'landing' | 'app') => {
     setViewMode(mode);
