@@ -18,7 +18,7 @@ import { GOAL_INTENT, type SegmentId } from '@/lib/assistant';
 export { looksLikeCommand } from '@/lib/assistant';
 
 export const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'] as const;
-const TAB_ALIASES: Record<string, (typeof TABS)[number]> = { home: 'overview', dashboard: 'overview', debts: 'planning', debt: 'planning', privacy: 'settings', assistant: 'copilot', chat: 'copilot' };
+const TAB_ALIASES: Record<string, (typeof TABS)[number]> = { home: 'overview', dashboard: 'overview', debts: 'planning', debt: 'planning', planner: 'planning', loans: 'planning', loan: 'planning', invest: 'planning', investments: 'planning', privacy: 'settings', assistant: 'copilot', chat: 'copilot' };
 
 /** A command waiting for its amount: sent back by the client with the user's answer (re-validated like any call). */
 export interface PendingCommand {
@@ -576,7 +576,9 @@ export const SEGMENT_TOOLS: Record<SegmentId, { read: string[]; commands: string
   goals: { read: ['calculate_savings_plan', 'plan_goal'], commands: GOAL_CMDS, overview: () => ({ name: 'calculate_savings_plan', args: {} }) },
   bills: { read: ['get_upcoming_bills', 'get_insights'], commands: ['add_bill', 'update_bill', 'pay_bill', 'delete_bill'], overview: () => ({ name: 'get_upcoming_bills', args: { days: 30 } }) },
   debts: { read: ['get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'get_debt_summary', args: {} }) },
-  planning: { read: ['get_debt_summary', 'calculate_savings_plan', 'plan_goal'], commands: [...DEBT_CMDS, ...GOAL_CMDS], overview: () => ({ name: 'get_debt_summary', args: {} }) },
+  planning: { read: ['get_debt_summary', 'compare_loans', 'get_investment_outlook', 'calculate_savings_plan'], commands: [...DEBT_CMDS, ...GOAL_CMDS], overview: () => ({ name: 'get_debt_summary', args: {} }) },
+  loans: { read: ['compare_loans', 'get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'compare_loans', args: {} }) },
+  invest: { read: ['get_investment_outlook', 'get_debt_summary'], commands: ['navigate'], overview: () => ({ name: 'get_investment_outlook', args: {} }) },
   learn: { read: ['get_insights', 'get_debt_summary', 'calculate_savings_plan'], commands: ['navigate'], overview: () => ({ name: 'get_insights', args: {} }) },
   import: { read: ['get_financial_summary', 'find_possible_duplicates'], commands: ['open_quick_add'] },
   settings: { read: [], commands: ['update_preferences'] },

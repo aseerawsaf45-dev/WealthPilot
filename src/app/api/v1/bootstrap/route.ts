@@ -9,12 +9,13 @@ import { listAccounts, listTransactions } from '@/server/repos/ledger';
 import { listBudgets, listGoals, listBills, listDebts } from '@/server/repos/planning';
 import { getProfile, listAudit } from '@/server/repos/user';
 import { getFxRates } from '@/server/repos/fx';
+import { listPlans, listOffers } from '@/server/repos/wealth';
 
 export const GET = authed(async (_request, { userId }) => {
   await rateLimit('bootstrap', [userId], 60, 60);
   const profile = await getProfile(userId);
   const today = todayIn(profile.timezone);
-  const [accounts, transactions, budgets, goals, bills, debts, auditLogs, fx] = await Promise.all([
+  const [accounts, transactions, budgets, goals, bills, debts, auditLogs, fx, investments, loanOffers] = await Promise.all([
     listAccounts(userId),
     listTransactions(userId),
     listBudgets(userId, today.slice(0, 7)),
@@ -23,6 +24,8 @@ export const GET = authed(async (_request, { userId }) => {
     listDebts(userId),
     listAudit(userId),
     getFxRates(),
+    listPlans(userId),
+    listOffers(userId),
   ]);
-  return ok({ preferences: profile.preferences, today, accounts, transactions, budgets, goals, bills, debts, auditLogs, fx });
+  return ok({ preferences: profile.preferences, today, accounts, transactions, budgets, goals, bills, debts, auditLogs, fx, investments, loanOffers });
 });

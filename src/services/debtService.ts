@@ -105,6 +105,7 @@ export function calculateDebtPayoffSchedule(
     totalMonths: currentMonth,
     totalInterestPaidCents,
     monthlyExtraPaymentCents,
+    neverPaysOff: activeDebts.some((d) => !d.isPaidOff),
     balanceByMonth: [...balanceByMonth, activeDebts.reduce((s, d) => s + Math.max(0, d.balanceCents), 0)],
     debtOrder: activeDebts.map((d) => ({
       id: d.id,

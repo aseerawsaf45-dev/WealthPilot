@@ -154,7 +154,7 @@ export function Navigation({
     { id: 'budgets', label: 'Budgets', icon: PieChart },
     { id: 'goals', label: 'Goals', icon: Target },
     { id: 'bills', label: 'Bills', icon: CalendarDays },
-    { id: 'planning', label: 'Debt Planner', icon: TrendingDown },
+    { id: 'planning', label: 'Planner', icon: TrendingDown },
     { id: 'copilot', label: 'Copilot', icon: Sparkles },
     { id: 'learn', label: 'Learn', icon: GraduationCap, badge: 'XP' },
     { id: 'import', label: 'Import', icon: Upload },
@@ -245,7 +245,7 @@ export function Navigation({
               );
             })}
 
-            {/* More: Debt Planner, Learn, Import. Shows the active tab's name when one of them is open. */}
+            {/* More: Planner (debt, loans, invest), Learn, Import. Shows the active tab's name when one of them is open. */}
             <div ref={moreRef} className="relative">
               <button
                 data-tab={activeMore ? activeMore.id : '__more'}

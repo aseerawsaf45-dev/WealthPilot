@@ -12,6 +12,8 @@ import {
   AuditEvent,
   CopilotMessage,
   GoalPlanSnapshot,
+  InvestmentPlan,
+  LoanOffer,
 } from '../types/finance';
 import {
   initialAccounts,
@@ -27,6 +29,7 @@ import { api, ApiError } from '../lib/api';
 import { setDisplayCurrency } from '../lib/money';
 import { demoGoalPlan } from '../lib/demoPlan';
 import type { FxRates } from '../lib/fx';
+import type { CountryMacroData } from '../lib/planning/invest';
 import { useChatHistory, type ChatSummary } from './useChatHistory';
 
 /**
@@ -54,6 +57,8 @@ interface Bootstrap {
   debts: DebtAccount[];
   auditLogs: AuditEvent[];
   fx?: FxRates | null;
+  investments?: InvestmentPlan[];
+  loanOffers?: LoanOffer[];
 }
 
 interface FinanceContextType {
@@ -67,6 +72,16 @@ interface FinanceContextType {
   auditLogs: AuditEvent[];
   /** Today's exchange rates (signed in); null when unavailable. Converted totals are estimates. */
   fx: FxRates | null;
+  investments: InvestmentPlan[];
+  loanOffers: LoanOffer[];
+  saveInvestmentPlan: (plan: Omit<InvestmentPlan, 'id' | 'updatedAt'>, id?: string) => Promise<InvestmentPlan | undefined>;
+  deleteInvestmentPlan: (id: string) => Promise<void>;
+  saveLoanOffer: (offer: Omit<LoanOffer, 'id' | 'updatedAt' | 'status' | 'debtId'>, id?: string) => Promise<LoanOffer | undefined>;
+  deleteLoanOffer: (id: string) => Promise<void>;
+  /** Turns an offer into a debt (server, atomic). */
+  takeLoan: (id: string, dueDateDay: number) => Promise<boolean>;
+  /** World Bank data for a country (cached per session); null when unavailable. */
+  getCountryMacro: (country: string) => Promise<CountryMacroData | null>;
   copilotHistory: CopilotMessage[];
   isReady: boolean;
   /** True while a save is in flight (signed in). */
@@ -172,6 +187,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [copilotHistory, setCopilotHistory] = useState<CopilotMessage[]>([welcomeMessage]);
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
   const [fx, setFx] = useState<FxRates | null>(null);
+  const [investments, setInvestments] = useState<InvestmentPlan[]>([]);
+  const [loanOffers, setLoanOffers] = useState<LoanOffer[]>([]);
+  const macroCache = useRef(new Map<string, Promise<CountryMacroData | null>>());
 
   // Every formatMoney() call without an explicit currency shows the user's base currency.
   // Set during render (idempotent) so children never render one frame in the old currency.
@@ -197,6 +215,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setDebts(data.debts);
     setAuditLogs(data.auditLogs);
     if (data.fx !== undefined) setFx(data.fx);
+    setInvestments(data.investments ?? []);
+    setLoanOffers(data.loanOffers ?? []);
     setPreferencesState({ ...defaultPreferences, ...data.preferences, isAuthenticated: true });
   };
 
@@ -213,6 +233,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setDebts(initialDebts);
     setAuditLogs([]);
     setFx(null);
+    setInvestments([]);
+    setLoanOffers([]);
     setCopilotHistory([welcomeMessage]);
     chatHistory.resetChats();
     setPreferencesState({ ...defaultPreferences, isAuthenticated: false });
@@ -463,6 +485,61 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       setBills((prev) => [...prev, created]);
     });
   };
+
+  const saveInvestmentPlan = async (plan: Omit<InvestmentPlan, 'id' | 'updatedAt'>, id?: string) => {
+    let saved: InvestmentPlan | undefined;
+    await run(async () => {
+      saved = id ? await api.patch<InvestmentPlan>(`/investments/${encodeURIComponent(id)}`, plan) : await api.post<InvestmentPlan>('/investments', plan);
+      setInvestments((prev) => (id ? prev.map((p) => (p.id === id ? saved! : p)) : [...prev, saved!]));
+    });
+    return saved;
+  };
+
+  const deleteInvestmentPlan = async (id: string) => {
+    await run(async () => {
+      await api.del(`/investments/${encodeURIComponent(id)}`);
+      setInvestments((prev) => prev.filter((p) => p.id !== id));
+    });
+  };
+
+  const saveLoanOffer = async (offer: Omit<LoanOffer, 'id' | 'updatedAt' | 'status' | 'debtId'>, id?: string) => {
+    let saved: LoanOffer | undefined;
+    await run(async () => {
+      saved = id ? await api.patch<LoanOffer>(`/loans/${encodeURIComponent(id)}`, offer) : await api.post<LoanOffer>('/loans', offer);
+      setLoanOffers((prev) => (id ? prev.map((o) => (o.id === id ? saved! : o)) : [...prev, saved!]));
+    });
+    return saved;
+  };
+
+  const deleteLoanOffer = async (id: string) => {
+    await run(async () => {
+      await api.del(`/loans/${encodeURIComponent(id)}`);
+      setLoanOffers((prev) => prev.filter((o) => o.id !== id));
+    });
+  };
+
+  const takeLoan = (id: string, dueDateDay: number) =>
+    run(async () => {
+      const res = await api.post<{ offer: LoanOffer; debt: DebtAccount }>(`/loans/${encodeURIComponent(id)}/take`, { dueDateDay });
+      setLoanOffers((prev) => prev.map((o) => (o.id === id ? res.offer : o)));
+      setDebts((prev) => [...prev, res.debt]);
+    });
+
+  // Stable identity: components use it as an effect dependency.
+  const getCountryMacro = useCallback((country: string) => {
+    let p = macroCache.current.get(country);
+    if (!p) {
+      p = api
+        .get<{ macro: CountryMacroData | null }>(`/macro?country=${encodeURIComponent(country)}`)
+        .then((r) => r.macro)
+        .catch(() => {
+          macroCache.current.delete(country); // retry next time
+          return null;
+        });
+      macroCache.current.set(country, p);
+    }
+    return p;
+  }, []);
 
   const addDebt = async (debt: Omit<DebtAccount, 'id' | 'userId'>) => {
     if (!isAuthed) {
@@ -803,6 +880,14 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         isReady,
         isSaving: pendingCount > 0,
         fx,
+        investments,
+        loanOffers,
+        saveInvestmentPlan,
+        deleteInvestmentPlan,
+        saveLoanOffer,
+        deleteLoanOffer,
+        takeLoan,
+        getCountryMacro,
         syncError,
         clearSyncError: () => setSyncError(null),
         addTransaction,

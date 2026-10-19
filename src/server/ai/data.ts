@@ -9,6 +9,8 @@ import type { FinanceData } from './tools';
 import type { AiConsentState } from './privacy';
 import { getFxRates } from '../repos/fx';
 import { listAccounts } from '../repos/ledger';
+import { listPlans, listOffers } from '../repos/wealth';
+import { getCountryMacro } from '../repos/macro';
 import { convertMinor } from '@/lib/fx';
 
 export async function loadCopilotContext(userId: string): Promise<{ consent: AiConsentState; data: FinanceData }> {
@@ -19,7 +21,7 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
   const today = todayIn(user.timezone);
   const since = addDays(today, -400); // ≥ 13 months: covers year-to-date and month-over-month comparisons
 
-  const [txs, budgets, goals, bills, debts, accounts, fx] = await Promise.all([
+  const [txs, budgets, goals, bills, debts, accounts, fx, investments, loanOffers] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId, status: { not: 'VOID' }, financialDate: { gte: since } },
       select: { id: true, financialDate: true, amountCents: true, category: true, currency: true, isTransfer: true, merchant: true, splits: { select: { category: true, amountCents: true } } },
@@ -32,7 +34,12 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
     prisma.debtAccount.findMany({ where: { userId }, select: { id: true, name: true, balanceCents: true, aprPercent: true, minimumPaymentCents: true } }),
     listAccounts(userId),
     getFxRates(),
+    listPlans(userId),
+    listOffers(userId),
   ]);
+  // Public country data for the user's plans (and their region), for the investment tools.
+  const countries = [...new Set([...investments.map((p) => p.country), ...(user.region && user.region !== 'EU' ? [user.region] : [])])].slice(0, 5);
+  const macro = Object.fromEntries(await Promise.all(countries.map(async (c) => [c, await getCountryMacro(c)] as const)));
 
   // Foreign-currency rows are converted to the preferred currency (an estimate, stated in every answer).
   // Rows with no rate keep their currency and are left out of category totals as before.
@@ -86,6 +93,10 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
       debts: debts.map((d) => ({ ...d, balanceCents: cents(d.balanceCents), minimumPaymentCents: cents(d.minimumPaymentCents) })),
       accounts: accounts.map((a) => ({ id: a.id, name: a.name })),
       balances: { liquidCents, assetsCents, liabilitiesCents },
+      investments,
+      loanOffers,
+      macro,
+      region: user.region,
     },
   };
 }

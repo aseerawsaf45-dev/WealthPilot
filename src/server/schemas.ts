@@ -7,6 +7,8 @@
 import { z } from 'zod';
 import { scanAndEnforcePciDssScope } from '@/lib/compliance/pciDssCompliance';
 import { isIsoCurrency } from '@/lib/currency';
+import { isCountryCode } from '@/lib/countries';
+import { SCENARIO_IDS } from '@/lib/planning/scenarios';
 
 export const money = z.number().int().safe();
 const nonNegMoney = money.nonnegative();
@@ -230,3 +232,33 @@ export const AiConsentInput = z.object({
 });
 
 export const PasswordConfirm = z.object({ password: z.string().min(1).max(128) });
+
+// ---- Wealth planner (rates in basis points: 1% = 100) ------------------------
+const bps = z.number().int().min(0).max(10_000);
+const country = z.string().trim().toUpperCase().refine(isCountryCode, 'Unknown country');
+export const InvestmentPlanInput = z.object({
+  name: text(80),
+  country,
+  currency: Currency,
+  initialCents: nonNegMoney,
+  monthlyCents: nonNegMoney,
+  horizonMonths: z.number().int().min(1).max(600),
+  riskProfile: z.enum(['conservative', 'balanced', 'growth']),
+  expectedReturnBps: z.number().int().min(-5_000).max(5_000).nullable().default(null),
+  taxBps: bps.default(0),
+  scenarios: z.array(z.enum(SCENARIO_IDS)).max(SCENARIO_IDS.length).default([]),
+});
+export const InvestmentPlanPatch = InvestmentPlanInput.partial();
+
+export const LoanOfferInput = z.object({
+  name: text(80),
+  lender: text(80),
+  principalCents: nonNegMoney.refine((v) => v > 0, 'Enter the loan amount'),
+  aprBps: bps,
+  termMonths: z.number().int().min(1).max(480),
+  feeCents: nonNegMoney.default(0),
+  purpose: z.enum(['personal', 'car', 'home', 'education', 'business']),
+  country: country.nullable().default(null),
+});
+export const LoanOfferPatch = LoanOfferInput.partial();
+export const TakeLoanInput = z.object({ dueDateDay: z.number().int().min(1).max(31) });

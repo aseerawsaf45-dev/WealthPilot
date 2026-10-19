@@ -169,6 +169,8 @@ export async function exportUserData(userId: string) {
     prisma.auditEvent.findMany({ where: { userId }, orderBy: { createdAt: 'asc' }, take: 5000 }),
   ]);
   const { toClientTransaction, toClientGoal, toClientBill, toClientDebt, toClientBudget } = await import('../mappers');
+  const { listPlans, listOffers } = await import('./wealth');
+  const [investmentPlans, loanOffers] = await Promise.all([listPlans(userId), listOffers(userId)]);
   const today = todayIn(profile.timezone);
   await prisma.$transaction((tx) => writeAudit(tx, userId, 'DATA_EXPORTED', `transactions=${txs.length}`));
   return {

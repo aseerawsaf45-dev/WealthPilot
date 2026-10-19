@@ -71,6 +71,10 @@ export function routeIntent(message: string, today: string, categories: string[]
   if (has(q, ['unusual', 'anomal', 'stand out', 'stands out', 'forecast', 'predict', 'run out of', 'runway', 'recurring', 'anything wrong', 'insight'])) return [{ name: 'get_insights', args: {} }];
   if (has(q, ['budget', 'overspen', 'over spen'])) return [{ name: 'get_budget_status', args: { month: period.start.slice(0, 7) } }];
   if (has(q, ['bill', 'due', 'subscription', 'upcoming payment'])) return [{ name: 'get_upcoming_bills', args: { days: 30 } }];
+  if (has(q, ['invest', 'stock', 'shares', 'portfolio', 'inflation', 'politic', 'geopolit', 'sanction', 'war ', 'recession'])) {
+    return has(q, ['debt', 'pay off', 'payoff', 'loan']) ? [{ name: 'get_investment_outlook', args: {} }, { name: 'get_debt_summary', args: {} }] : [{ name: 'get_investment_outlook', args: {} }];
+  }
+  if (has(q, ['loan offer', 'compare loan', 'afford a loan', 'afford the loan', 'take a loan', 'borrow', 'emi'])) return [{ name: 'compare_loans', args: {} }];
   if (has(q, ['debt', 'snowball', 'avalanche', 'payoff', 'pay off', 'loan', 'credit card'])) return [{ name: 'get_debt_summary', args: {} }];
   if (has(q, ['goal', 'saving for', 'save for', 'emergency fund', 'savings plan', 'my savings', 'on track to save'])) {
     const monthlyCents = detectMonthlyAmount(q, currency);

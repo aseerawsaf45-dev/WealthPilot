@@ -11,7 +11,12 @@ import { z } from 'zod';
 import { ymd, monthYear } from '../schemas';
 import { addDays, billState, spendByCategory } from '../mappers';
 import type { FactDraft, SuggestedAction } from './schema';
-import type { Contingency } from '@/types/finance';
+import type { Contingency, InvestmentPlan, LoanOffer } from '@/types/finance';
+import { assumptions, projectInvestment, type CountryMacroData } from '@/lib/planning/invest';
+import { compareOffers, affordability } from '@/lib/planning/loans';
+import { payDebtOrInvest } from '@/lib/planning/link';
+import { countryName } from '@/lib/countries';
+import type { ScenarioId } from '@/lib/planning/scenarios';
 import { buildInsights, monthlyEquivalent } from '@/lib/ml';
 
 // ---- Data the tools run on (already scoped to one user) ---------------------
@@ -36,6 +41,11 @@ export interface FinanceData {
   accounts?: { id: string; name: string }[]; // only for resolving assistant commands
   /** Base-currency balances (derived). Absent in older fixtures → insights treat them as 0. */
   balances?: { liquidCents: number; assetsCents: number; liabilitiesCents: number };
+  /** Investment plans, loan offers and public country data (planner tools). */
+  investments?: InvestmentPlan[];
+  loanOffers?: LoanOffer[];
+  macro?: Record<string, CountryMacroData | null>;
+  region?: string | null;
   /** Set when foreign-currency rows were converted to `currency` (totals become estimates). */
   fxNote?: string;
 }
@@ -653,7 +663,7 @@ function debtSummary(_args: Record<string, never>, data: FinanceData): ToolOutpu
     template:
       'You have {{#0}} debts totalling {{#1}}, with minimum payments of {{#2}} per month. ' +
       'The highest rate is {{#3}} at {{#4}} APR. The avalanche method pays that one first to save the most interest; ' +
-      'the snowball method pays the smallest balance first for quicker wins. Compare both in the Debt Planner.',
+      'the snowball method pays the smallest balance first for quicker wins. Compare both in the Planner.',
     limitations: [],
     actions: [],
   };
@@ -755,6 +765,90 @@ function insightsTool(_args: Record<string, never>, data: FinanceData): ToolOutp
   };
 }
 
+
+// ---- Wealth planner tools (labels carry no user-typed names or digits; numbers are facts) ----
+
+function loansTool(_args: Record<string, never>, data: FinanceData): ToolOutput {
+  const offers = (data.loanOffers ?? []).filter((o) => o.status === 'considering');
+  const facts: FactDraft[] = [];
+  const add = (f: FactDraft) => facts.push(f) - 1;
+  if (!offers.length) {
+    return { period: null, facts, template: 'You have no loan offers to compare yet. Add the offers you are considering in the Planner (Loans) to compare their real cost and check affordability.', limitations: [], actions: [] };
+  }
+  const ranked = compareOffers(offers);
+  const best = ranked[0];
+  const n = add(count('Loan offers compared', ranked.length));
+  const pay = add(money('Monthly payment of the cheapest offer', best.emiCents, data.currency, 'estimate'));
+  const cost = add(money('Interest and fees of the cheapest offer', best.totalCostCents, data.currency, 'estimate'));
+  const real = add(percent('Real yearly rate of the cheapest offer including fees', Math.round(best.effectiveAprBps) / 100, 'estimate'));
+  const parts = [`${ranked.length === 1 ? 'Your offer' : `Of {{#${n}}} offers, the cheapest`} overall costs {{#${cost}}} in interest and fees, at {{#${pay}}} a month (real rate {{#${real}}} including fees)`];
+  if (ranked.length > 1) {
+    const diff = add(money('Extra cost of the most expensive offer', ranked[ranked.length - 1].totalCostCents - best.totalCostCents, data.currency, 'estimate'));
+    parts.push(`the most expensive one costs {{#${diff}}} more`);
+  }
+  const income = averageIncome(data);
+  const minimums = data.debts.reduce((x, d) => x + d.minimumPaymentCents, 0);
+  const a = affordability(best.emiCents, minimums, income);
+  if (a.dtiPct !== null) {
+    const dti = add(percent('Share of income going to debt payments with the cheapest offer', a.dtiPct, 'estimate'));
+    parts.push(`with it, {{#${dti}}} of your income would go to debt payments (${a.band === 'healthy' ? 'a healthy level' : a.band === 'stretched' ? 'stretched; most lenders prefer under 36%' : 'risky; above the 43% most lenders accept'})`);
+  }
+  return { period: null, facts, template: parts.join('; ') + '.', limitations: ['Loan costs assume fixed rates and on-time payments.'], actions: [] };
+}
+
+function averageIncome(data: FinanceData): number {
+  const thisMonth = data.today.slice(0, 7);
+  let total = 0;
+  let months = 0;
+  for (const n of [1, 2, 3]) {
+    const pr = monthRange(shiftMonth(thisMonth, -n));
+    const rows = data.transactions.filter((t) => t.currency === data.currency && !t.isTransfer && t.amountCents > 0 && inPeriod(t.financialDate, pr));
+    if (!rows.length) continue;
+    total += rows.reduce((x, t) => x + t.amountCents, 0);
+    months++;
+  }
+  return months ? Math.round(total / months) : 0;
+}
+
+function investmentTool(_args: Record<string, never>, data: FinanceData): ToolOutput {
+  const plan = (data.investments ?? [])[0];
+  const country = plan?.country ?? (data.region && data.region !== 'EU' ? data.region : null);
+  const facts: FactDraft[] = [];
+  const add = (f: FactDraft) => facts.push(f) - 1;
+  const parts: string[] = [];
+  const limitations = ['Projections are estimates from public data and fixed assumptions, not advice; political risk comes only from the World Bank stability index and the stress tests you pick.'];
+  const macro = country ? data.macro?.[country] ?? null : null;
+  if (country && macro) {
+    const where = countryName(country);
+    if (macro.inflationPct) parts.push(`inflation in ${where} is {{#${add(percent('Inflation in the plan country', macro.inflationPct.value))}}}`);
+    if (macro.depositRatePct) parts.push(`banks pay about {{#${add(percent('Deposit interest rate in the plan country', macro.depositRatePct.value))}}} on deposits`);
+    if (macro.politicalStability) {
+      const v = macro.politicalStability.value;
+      parts.push(`political stability is ${v >= 0 ? 'average or better' : v >= -1 ? 'below average' : 'low'} on the World Bank index`);
+    }
+    if (macro.depreciationPctPerYear && macro.depreciationPctPerYear.value > 1) parts.push(`the currency has lost about {{#${add(percent('Yearly loss of the currency against the US dollar', macro.depreciationPctPerYear.value))}}} a year against the dollar`);
+  } else if (country) {
+    limitations.push('No World Bank data was available for the plan country; assumptions are used.');
+  }
+  if (plan) {
+    const a = assumptions(macro, plan.riskProfile, plan.expectedReturnBps);
+    const proj = projectInvestment({ initialCents: plan.initialCents, monthlyCents: plan.monthlyCents, months: plan.horizonMonths, a, taxBps: plan.taxBps, risk: plan.riskProfile, scenarios: plan.scenarios as ScenarioId[] });
+    const ret = add(percent('Expected yearly return of the plan', a.returnBps / 100, 'estimate'));
+    const med = add(money('Likely value of the plan at the end', proj.final.medianCents, plan.currency, 'estimate'));
+    const lo = add(money('Low end of the likely range', proj.final.lowCents, plan.currency, 'estimate'));
+    const hi = add(money('High end of the likely range', proj.final.highCents, plan.currency, 'estimate'));
+    const realV = add(money('Likely value in todays money', proj.final.realCents, plan.currency, 'estimate'));
+    parts.push(`your main plan expects about {{#${ret}}} a year and would likely reach {{#${med}}} (range {{#${lo}}} to {{#${hi}}}), or {{#${realV}}} in today's money`);
+    if (proj.stressLossPct !== null) parts.push(`with the stress tests you picked it is about {{#${add(percent('First year loss under the chosen stress tests', Math.abs(proj.stressLossPct), 'estimate'))}}} lower after the first year`);
+    const dear = payDebtOrInvest(data.debts.map((d) => ({ ...d, id: d.id ?? d.name, userId: '', dueDateDay: 1, category: 'personal_loan' as const })), plan.monthlyCents, a.returnBps, plan.taxBps);
+    if (dear.payFirst.length) parts.push(`${dear.payFirst.length === 1 ? 'one debt costs' : 'some debts cost'} more than the plan is expected to earn, so paying ${dear.payFirst.length === 1 ? 'it' : 'them'} first is likely better`);
+  } else {
+    parts.push('you have no investment plan yet; create one in the Planner (Invest) to project it by country and risk');
+  }
+  if (!parts.length) parts.push('there is no country data yet; set your country in Settings or create a plan');
+  return { period: null, facts, template: `Here is your investment outlook: ${parts.join('; ')}.`, limitations, actions: [] };
+}
+
 // ---- Registry ---------------------------------------------------------------
 
 export interface ToolDef {
@@ -802,6 +896,20 @@ export const TOOLS: ToolDef[] = [
   },
   { name: 'get_debt_summary', description: 'Number of debts, total balance, total minimum payments and the highest-interest debt.', args: empty, llm: true, run: debtSummary as ToolDef['run'] },
   { name: 'find_possible_duplicates', description: 'Possible duplicate charges in the last 90 days.', args: empty, llm: false, run: possibleDuplicates as ToolDef['run'] },
+  {
+    name: 'compare_loans',
+    description: 'Compare the loan offers the user is considering: cheapest total cost, monthly payment, real rate with fees, and affordability (share of income to debt).',
+    args: empty,
+    llm: true,
+    run: loansTool as ToolDef['run'],
+  },
+  {
+    name: 'get_investment_outlook',
+    description: 'Investment outlook for the user\'s plan or country: inflation, deposit rates, political stability, currency trend, projected value range and stress tests, and whether to pay debt first.',
+    args: empty,
+    llm: true,
+    run: investmentTool as ToolDef['run'],
+  },
   {
     name: 'get_insights',
     description: 'What stands out right now: unusual charges, recurring payments, a 30-day cash forecast with a range, spending change vs last month, and months of cash runway.',

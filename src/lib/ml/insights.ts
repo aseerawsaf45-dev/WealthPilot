@@ -11,8 +11,9 @@ import { detectAnomalies, type Anomaly } from './anomalies';
 import { forecastCashFlow, type Forecast } from './forecast';
 import { compareMonths, averageMonths, budgetPace, goalEta, debtToAsset, type MonthComparison, type BudgetPace, type GoalEta } from './monthly';
 import { suggestCategories, type CategorySuggestion } from './categorize';
+import { affordability, emi } from '../planning/loans';
 
-export type InsightSegment = 'overview' | 'transactions' | 'accounts' | 'budgets' | 'goals' | 'bills' | 'debts' | 'learn' | 'import' | 'settings';
+export type InsightSegment = 'overview' | 'transactions' | 'accounts' | 'budgets' | 'goals' | 'bills' | 'debts' | 'loans' | 'invest' | 'learn' | 'import' | 'settings';
 export type Severity = 'good' | 'info' | 'warn' | 'alert';
 
 /** A client action an insight can offer; the page asks before running it. */
@@ -47,6 +48,9 @@ export interface InsightInput {
   assetsCents: number;
   liabilitiesCents: number;
   rules?: Array<{ keyword: string; category: string }>;
+  /** Planner items (optional): loan offers being considered and investment plans. */
+  loanOffers?: Array<{ name: string; lender: string; principalCents: number; aprBps: number; termMonths: number; status: string }>;
+  investments?: Array<{ name: string; currency: string; monthlyCents: number }>;
 }
 
 export interface InsightReport {
@@ -205,7 +209,28 @@ export function buildInsights(input: InsightInput): InsightReport {
   const costly = [...debts].filter((d) => d.balanceCents > 0).sort((a, b) => b.aprPercent - a.aprPercent)[0];
   if (costly && costly.aprPercent >= 15) {
     const monthlyInterest = Math.round((costly.balanceCents * costly.aprPercent) / 1200);
-    push({ id: 'debt-costly', segments: ['debts', 'overview'], severity: 'warn', title: `${costly.name} costs about ${money(monthlyInterest)} a month in interest`, detail: `At ${costly.aprPercent}% APR it's your most expensive debt. Paying it first (avalanche) saves the most interest.`, method: 'Balance × APR ÷ 12', action: { label: 'Open Debt Planner', action: { type: 'open_tab', tab: 'planning' } } });
+    push({ id: 'debt-costly', segments: ['debts', 'overview'], severity: 'warn', title: `${costly.name} costs about ${money(monthlyInterest)} a month in interest`, detail: `At ${costly.aprPercent}% APR it's your most expensive debt. Paying it first (avalanche) saves the most interest.`, method: 'Balance × APR ÷ 12', action: { label: 'Open Planner', action: { type: 'open_tab', tab: 'planning' } } });
+  }
+
+  // ---- Planner: loans and investments ---------------------------------------------------------
+  const minimums = debts.reduce((s, d) => s + d.minimumPaymentCents, 0);
+  for (const [i, o] of (input.loanOffers ?? []).filter((x) => x.status === 'considering').slice(0, 3).entries()) {
+    const a = affordability(emi(o.principalCents, o.aprBps, o.termMonths), minimums, averages.incomeCents);
+    if (a.band === 'stretched' || a.band === 'risky') {
+      push({ id: `loan-dti-${i}`, segments: ['loans'], severity: a.band === 'risky' ? 'alert' : 'warn', title: `${o.name} (${o.lender}) would put ${a.dtiPct}% of income into debt payments`, detail: `${a.band === 'risky' ? 'Above the 43% most lenders accept.' : 'Above the 36% usually considered healthy.'} A smaller amount or a longer term lowers the monthly payment.`, method: '(new monthly payment + existing minimums) ÷ average income' });
+    }
+  }
+  const plans = input.investments ?? [];
+  if (plans.length) {
+    const free = surplus - minimums;
+    const planned = plans.filter((p) => p.currency === currency).reduce((s, p) => s + p.monthlyCents, 0);
+    if (averages.monthsUsed && planned > Math.max(0, free)) {
+      push({ id: 'invest-unfunded', segments: ['invest'], severity: 'warn', title: 'Your plans need more than you have spare', detail: `Plans add ${money(planned)} a month, but about ${money(Math.max(0, free))} is left after spending and debt minimums.`, method: 'Average surplus − debt minimums' });
+    }
+    const dear = debts.filter((d) => d.balanceCents > 0 && d.aprPercent >= 10).sort((a, b) => b.aprPercent - a.aprPercent)[0];
+    if (dear) {
+      push({ id: 'invest-pay-debt', segments: ['invest', 'debts'], severity: 'info', title: `Consider paying off ${dear.name} before investing more`, detail: `At ${dear.aprPercent}% APR it likely costs more than most investments earn after tax. See "Pay or invest?" in the Planner.`, method: 'Debt APR vs typical investment returns', action: { label: 'Open Planner', action: { type: 'open_tab', tab: 'planning' } } });
+    }
   }
 
   // ---- Categorization ----------------------------------------------------------------------

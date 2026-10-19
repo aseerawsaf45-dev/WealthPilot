@@ -1148,3 +1148,80 @@ describe('Ambiguous dates pick the order closest to today', async () => {
     assert.strictEqual(parseDate('14/10/2026', 'mdy'), '2026-10-14'); // only day-first is a real date
   });
 });
+
+describe('Wealth planner maths (loans, invest, scenarios, links)', async () => {
+  const L = await import('../src/lib/planning/loans.ts');
+  const I = await import('../src/lib/planning/invest.ts');
+  const K = await import('../src/lib/planning/link.ts');
+  const { calculateDebtPayoffSchedule: sched } = await import('../src/services/debtService.ts');
+
+  it('EMI and amortization end at exactly zero; zero APR splits evenly', () => {
+    assert.strictEqual(L.emi(1_000_000, 1200, 12), 88849); // 10,000.00 at 12% over a year
+    const a = L.amortize(1_000_000, 1200, 12);
+    assert.strictEqual(a.schedule.length, 12);
+    assert.strictEqual(a.schedule.at(-1)!.balanceCents, 0);
+    assert.strictEqual(a.totalPaidCents, 1_000_000 + a.totalInterestCents);
+    assert.ok(a.schedule.every((r) => Number.isInteger(r.interestCents)));
+    assert.strictEqual(L.emi(120_000, 0, 12), 10_000);
+  });
+
+  it('fees raise the effective APR; DTI bands', () => {
+    assert.strictEqual(L.effectiveAprBps(1_000_000, 0, 1200, 12), 1200);
+    assert.ok(L.effectiveAprBps(1_000_000, 20_000, 1200, 12) > 1500);
+    assert.deepStrictEqual(L.affordability(30_000, 10_000, 100_000), { dtiPct: 40, band: 'stretched' });
+    assert.strictEqual(L.affordability(1, 0, 0).band, 'unknown');
+  });
+
+  it('prepaying shortens the term and saves interest', () => {
+    const s = L.prepaymentSavings(1_000_000, 1200, 24, 20_000);
+    assert.ok(s.monthsSaved > 0 && s.interestSavedCents > 0);
+    assert.strictEqual(L.prepaymentSavings(1_000_000, 1200, 24, 0).monthsSaved, 0);
+  });
+
+  it('zero-volatility projection equals compound growth; scenarios lower it', () => {
+    const a = { returnBps: 1200, volBps: 0, inflationBps: 0, depreciationBps: 0, notes: [] };
+    const p = I.projectInvestment({ initialCents: 100_000, monthlyCents: 0, months: 12, a, risk: 'growth' });
+    assert.ok(Math.abs(p.final.medianCents - Math.round(100_000 * 1.01 ** 12)) <= 12);
+    assert.strictEqual(p.final.lowCents, p.final.highCents);
+    const s = I.projectInvestment({ initialCents: 100_000, monthlyCents: 0, months: 12, a, risk: 'growth', scenarios: ['recession'] });
+    assert.ok(s.final.medianCents < p.final.medianCents && (s.stressLossPct ?? 0) < -20);
+    const c = I.projectInvestment({ initialCents: 100_000, monthlyCents: 0, months: 12, a, risk: 'conservative', scenarios: ['recession'] });
+    assert.ok(c.final.medianCents > s.final.medianCents); // less exposed
+  });
+
+  it('country data drives the expected return; low political stability lowers it', () => {
+    const pt = (value: number) => ({ value, year: '2025' });
+    const macro = { country: 'BD', inflationPct: pt(8.8), lendingRatePct: pt(8.6), depositRatePct: pt(9.4), realRatePct: pt(2), gdpGrowthPct: pt(3.5), politicalStability: pt(-0.94), depreciationPctPerYear: pt(6), source: 'World Bank', fetchedAt: '' };
+    const a = I.assumptions(macro, 'balanced');
+    assert.strictEqual(a.returnBps, 940 + 300 - 50);
+    assert.strictEqual(a.inflationBps, 880);
+    assert.strictEqual(I.assumptions(null, 'conservative').returnBps, 500);
+    assert.strictEqual(I.assumptions(macro, 'growth', 700).returnBps, 700);
+  });
+
+  it('pay dear debt before investing; a taken loan becomes a debt', () => {
+    const debt = (id: string, apr: number) => ({ id, userId: 'u', name: id, balanceCents: 500_000, aprPercent: apr, minimumPaymentCents: 15_000, dueDateDay: 5, category: 'credit_card' as const });
+    const r = K.payDebtOrInvest([debt('card', 24), debt('car', 4)], 20_000, 800);
+    assert.deepStrictEqual([r.recommendation, r.payFirst.map((d) => d.id), r.investFirst.map((d) => d.id)], ['split', ['card'], ['car']]);
+    assert.ok(r.interestSavedCents > 0 && r.monthsSooner > 0);
+    assert.strictEqual(K.payDebtOrInvest([], 1, 800).recommendation, 'no_debt');
+    const d = K.loanToDebtInput({ name: 'Car', lender: 'City Bank', principalCents: 1_000_000, aprBps: 1200, termMonths: 12, purpose: 'car' }, 31);
+    assert.deepStrictEqual([d.category, d.aprPercent, d.minimumPaymentCents, d.dueDateDay], ['car_loan', 12, 88849, 28]);
+  });
+
+  it('flags debts whose payments never cover the interest', () => {
+    const s = sched([{ id: 'x', userId: 'u', name: 'x', balanceCents: 1_000_000, aprPercent: 30, minimumPaymentCents: 1_000, dueDateDay: 1, category: 'credit_card' }], 0, 'avalanche');
+    assert.strictEqual(s.neverPaysOff, true);
+  });
+});
+
+describe('Debt-first vs invest net worth paths', async () => {
+  const K = await import('../src/lib/planning/link.ts');
+  it('with a 24% card and a 6% return, paying the card first ends with more net worth', () => {
+    const card = { id: 'c', userId: 'u', name: 'Card', balanceCents: 500_000, aprPercent: 24, minimumPaymentCents: 15_000, dueDateDay: 5, category: 'credit_card' as const };
+    const p = K.netWorthPaths([card], 30_000, 600, 60);
+    const last = p.at(-1)!;
+    assert.strictEqual(p.length, 5);
+    assert.ok(last.debtFirstCents > last.investCents);
+  });
+});

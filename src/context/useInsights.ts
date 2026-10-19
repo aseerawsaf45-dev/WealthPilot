@@ -13,7 +13,7 @@ import { useToday } from '../lib/dates';
  * rate are left out, as in every other total).
  */
 export function useInsights(): InsightReport {
-  const { transactions, accounts, bills, budgets, goals, debts, preferences, fx } = useFinance();
+  const { transactions, accounts, bills, budgets, goals, debts, preferences, fx, loanOffers, investments } = useFinance();
   const currency = preferences.baseCurrency || 'USD';
   const today = useToday();
 
@@ -50,6 +50,8 @@ export function useInsights(): InsightReport {
       liquidCents: liquid,
       assetsCents: nw.totalAssetsCents,
       liabilitiesCents: nw.totalLiabilitiesCents,
+      loanOffers,
+      investments,
     });
-  }, [transactions, accounts, bills, budgets, goals, debts, currency, fx, today]);
+  }, [transactions, accounts, bills, budgets, goals, debts, currency, fx, today, loanOffers, investments]);
 }

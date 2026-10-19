@@ -54,6 +54,8 @@ model User {
   sessions             Session[]
   merchantRules        MerchantRule[]
   pageInsights         PageInsight[]
+  investmentPlans      InvestmentPlan[]
+  loanOffers           LoanOffer[]
 
   @@map("users")
 }
@@ -372,4 +374,60 @@ model PageInsight {
 
   @@id([userId, segment])
   @@map("page_insights")
+}
+
+// -----------------------------------------------------------------------------
+// WEALTH PLANNER: investment plans and loan offers (rates in basis points, money in minor units)
+// -----------------------------------------------------------------------------
+
+model InvestmentPlan {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  country           String // ISO-3166 alpha-2: where the money is invested
+  currency          String
+  initialCents      BigInt
+  monthlyCents      BigInt
+  horizonMonths     Int
+  riskProfile       String // conservative | balanced | growth
+  expectedReturnBps Int? // user override; null = derived from country data + risk profile
+  taxBps            Int      @default(0) // tax on gains
+  scenarios         String[] @default([])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@map("investment_plans")
+}
+
+model LoanOffer {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  lender         String
+  principalCents BigInt
+  aprBps         Int
+  termMonths     Int
+  feeCents       BigInt   @default(0)
+  purpose        String // personal | car | home | education | business
+  country        String?
+  status         String   @default("considering") // considering | taken
+  debtId         String? // the DebtAccount created when taken
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId])
+  @@map("loan_offers")
+}
+
+// Public World Bank indicators per country (not user data), refreshed every 30 days.
+model CountryMacro {
+  country   String   @id // ISO-3166 alpha-2
+  data      Json
+  source    String
+  fetchedAt DateTime @default(now())
+
+  @@map("country_macros")
 }

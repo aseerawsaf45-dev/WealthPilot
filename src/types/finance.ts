@@ -104,6 +104,8 @@ export interface DebtPayoffComparison {
   totalInterestPaidCents: number;
   /** Total remaining balance at the start of each month (index 0 = today), ending at 0. */
   balanceByMonth?: number[];
+  /** True when the 30-year simulation ends with debt left (payments don't cover the interest). */
+  neverPaysOff?: boolean;
   monthlyExtraPaymentCents: number;
   debtOrder: Array<{
     id: string;
@@ -246,4 +248,34 @@ export interface CopilotFact {
   unit: 'cents' | 'pct' | 'count' | 'days' | 'months' | 'date' | 'text';
   currency?: string;
   kind: 'recorded' | 'estimate';
+}
+
+export interface InvestmentPlan {
+  id: string;
+  name: string;
+  country: string; // ISO-2
+  currency: string;
+  initialCents: number;
+  monthlyCents: number;
+  horizonMonths: number;
+  riskProfile: 'conservative' | 'balanced' | 'growth';
+  expectedReturnBps: number | null;
+  taxBps: number;
+  scenarios: string[];
+  updatedAt: string;
+}
+
+export interface LoanOffer {
+  id: string;
+  name: string;
+  lender: string;
+  principalCents: number;
+  aprBps: number;
+  termMonths: number;
+  feeCents: number;
+  purpose: 'personal' | 'car' | 'home' | 'education' | 'business';
+  country: string | null;
+  status: 'considering' | 'taken';
+  debtId: string | null;
+  updatedAt: string;
 }
