@@ -107,7 +107,7 @@ async function readPdf(file: File, opts: Opts): Promise<ExtractResult> {
   const p = (stage: string, pct: number) => opts.onProgress?.({ file: file.name, stage, pct });
   p('Opening PDF', 5);
   const pdfjs = await import('pdfjs-dist');
-  pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+  pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.js';
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
   const pages = Math.min(doc.numPages, 20);
   const lines: string[] = [];

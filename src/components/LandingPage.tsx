@@ -52,7 +52,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
   const faqs = [
     {
       q: 'Where is my data stored, and who can see it?',
-      a: 'When you sign in, your ledger is stored in an encrypted PostgreSQL database (Neon) and every request is checked against your own session, so no one else can read it. Uploaded receipts and statements are read on your device; the files themselves are never uploaded. AI is off until you turn it on, and even then it only sees labels, never your amounts. The demo needs no account: demo data stays in your browser tab.',
+      a: 'When you sign in, your ledger is stored in an encrypted PostgreSQL database (Neon) and every request is checked against your own session, so no one else can read it. Uploaded receipts and statements are read on your device; the files themselves are never uploaded. AI is off until you turn it on, and even then it only sees labels, never your amounts.',
     },
     {
       q: 'What is the "Minor-Unit Integer Accounting" engine?',
@@ -184,7 +184,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
             onClick={onLaunchApp}
             className="w-full sm:w-auto px-7 py-3.5 rounded-full bg-white hover:bg-slate-50 border border-slate-200/90 text-slate-800 text-sm font-bold shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>Try the demo (no account)</span>
+            <span>Create a free account</span>
             <Sparkles className="w-4 h-4 text-sky-600" />
           </button>
         </div>

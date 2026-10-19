@@ -401,19 +401,6 @@ export function Navigation({
               )}
             </div>
 
-            {/* Public Landing Page Button */}
-            {onOpenLanding && (
-              <button
-                onClick={onOpenLanding}
-                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white/90 hover:bg-slate-100 text-slate-700 hover:text-black text-xs font-bold transition-all cursor-pointer border border-slate-200/80 shadow-2xs hover:scale-102 whitespace-nowrap"
-                title="View Public Marketing Landing Page"
-                aria-label="Landing page"
-              >
-                <Globe className="w-3.5 h-3.5 text-sky-600" />
-                <span className="hidden 2xl:inline">Landing Page</span>
-              </button>
-            )}
-
             {/* User Profile Pill / Dropdown Trigger */}
             <div className="relative">
               <button

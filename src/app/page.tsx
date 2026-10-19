@@ -115,6 +115,19 @@ function WealthPilotApp() {
     window.scrollTo({ top: 0 });
   }, [activeTab, viewMode]);
 
+  // No demo: signed-out visitors (incl. Back or a typed #app URL after logout) go to landing + sign-in.
+  // replaceState, so Back doesn't bounce into the app again.
+  const signedOutInApp = isReady && !preferences.isAuthenticated && viewMode === 'app';
+  useEffect(() => {
+    if (!signedOutInApp) return;
+    const toLanding = () => {
+      if (window.location.hash.startsWith('#app')) window.history.replaceState(null, '', '#landing');
+    };
+    toLanding();
+    window.addEventListener('hashchange', toLanding);
+    return () => window.removeEventListener('hashchange', toLanding);
+  }, [signedOutInApp]);
+
   const handleSetViewMode = (mode: 'landing' | 'app') => {
     setViewMode(mode);
     if (mode === 'landing') {
@@ -193,7 +206,7 @@ function WealthPilotApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (viewMode === 'landing') {
+  if (viewMode === 'landing' || signedOutInApp) {
     return (
       <>
         <LandingPage
@@ -201,7 +214,10 @@ function WealthPilotApp() {
             setAuthModalMode(mode || 'signin');
             setAuthModalOpen(true);
           }}
-          onLaunchApp={() => handleSetViewMode('app')}
+          onLaunchApp={() => {
+            setAuthModalMode('signup');
+            setAuthModalOpen(true);
+          }}
         />
         <AuthModal
           isOpen={authModalOpen}
@@ -234,20 +250,6 @@ function WealthPilotApp() {
 
       {/* Main Workspace Stage with Generous Spacing and Breathing Room */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-32 sm:pb-24">
-        {isReady && !preferences.isAuthenticated && (
-          <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
-            <span>Demo data — not saved. Changes disappear when you reload.</span>
-            <button
-              onClick={() => {
-                setAuthModalMode('signin');
-                setAuthModalOpen(true);
-              }}
-              className="rounded-full bg-amber-900 px-3 py-1.5 text-white hover:bg-amber-800 cursor-pointer"
-            >
-              Sign in to save your data
-            </button>
-          </div>
-        )}
         {syncError && (
           <div role="alert" className="wp-pop fixed bottom-24 sm:bottom-6 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-rose-300 bg-white px-4 py-3 text-xs font-semibold text-rose-800 shadow-lg">
             <span>{syncError}</span>
