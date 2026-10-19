@@ -106,7 +106,7 @@ export function BanksCard({ country, purpose, onPick }: { country: string; purpo
       ) : state.error ? (
         <p className="mt-4 text-xs font-semibold text-slate-500">{state.error}</p>
       ) : picks.length === 0 ? (
-        <p className="mt-4 text-xs font-medium text-slate-500">{tab === 'caution' ? 'No bank had worrying news recently.' : tab === 'international' ? 'No international bank appeared in recent local news.' : 'No banks found for this country in public data.'}</p>
+        <p className="mt-4 text-xs font-medium text-slate-500">{tab === 'caution' ? 'No bank had worrying news recently.' : tab === 'international' ? 'No local arm of an international bank is listed here, and none appeared in recent local news.' : 'No banks found for this country in public data.'}</p>
       ) : (
         <ul className="wp-stagger mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
           {picks.map((p) => {

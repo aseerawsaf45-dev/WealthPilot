@@ -13,7 +13,7 @@ import { addDays, billState, spendByCategory } from '../mappers';
 import type { FactDraft, SuggestedAction } from './schema';
 import type { Contingency, InvestmentPlan, LoanOffer } from '@/types/finance';
 import { assumptions, projectInvestment, type CountryMacroData } from '@/lib/planning/invest';
-import { compareOffers, affordability } from '@/lib/planning/loans';
+import { compareOffers, affordability, borrowCapacity } from '@/lib/planning/loans';
 import { payDebtOrInvest } from '@/lib/planning/link';
 import { countryName } from '@/lib/countries';
 import type { ScenarioId } from '@/lib/planning/scenarios';
@@ -775,8 +775,22 @@ function loansTool(_args: Record<string, never>, data: FinanceData): ToolOutput 
   const offers = (data.loanOffers ?? []).filter((o) => o.status === 'considering');
   const facts: FactDraft[] = [];
   const add = (f: FactDraft) => facts.push(f) - 1;
+  const income = averageIncome(data);
+  const minimums = data.debts.reduce((x, d) => x + d.minimumPaymentCents, 0);
+  const country = data.region && data.region !== 'EU' ? data.region : null;
+  const lending = country ? data.macro?.[country]?.lendingRatePct?.value ?? null : null;
   if (!offers.length) {
-    return { period: null, facts, template: 'You have no loan offers to compare yet. Add the offers you are considering in the Planner (Loans) to compare their real cost and check affordability.', limitations: [], actions: [] };
+    const parts = ['You have no loan offers to compare yet'];
+    const limitations = ['Borrowing room uses your average income over the last three months and a 60-month term; banks decide with their own checks.'];
+    if (lending !== null && country) parts.push(`the average bank lending rate in ${countryName(country)} is {{#${add(percent('Average bank lending rate in your country', lending))}}}`);
+    const cap = borrowCapacity(income, minimums, Math.round((lending ?? 10) * 100), 60);
+    if (cap) {
+      const pay = add(money('Comfortable monthly loan payment (debt payments up to 36% of income)', cap.safeEmiCents, data.currency, 'estimate'));
+      const max = add(money('Loan you could comfortably repay over five years', cap.safePrincipalCents, data.currency, 'estimate'));
+      parts.push(`with your income and current debt payments, a comfortable loan payment is up to {{#${pay}}} a month, which repays about {{#${max}}} over five years${lending === null ? ' at an assumed rate' : ' at that rate'}`);
+    } else limitations.push('There is no recent income to estimate how much you can borrow.');
+    parts.push('use the loan calculator in the Planner (Loans), then save the offers banks give you to compare them');
+    return { period: null, facts, template: parts.join('; ') + '.', limitations, actions: [] };
   }
   const ranked = compareOffers(offers);
   const best = ranked[0];
@@ -789,8 +803,6 @@ function loansTool(_args: Record<string, never>, data: FinanceData): ToolOutput 
     const diff = add(money('Extra cost of the most expensive offer', ranked[ranked.length - 1].totalCostCents - best.totalCostCents, data.currency, 'estimate'));
     parts.push(`the most expensive one costs {{#${diff}}} more`);
   }
-  const income = averageIncome(data);
-  const minimums = data.debts.reduce((x, d) => x + d.minimumPaymentCents, 0);
   const a = affordability(best.emiCents, minimums, income);
   if (a.dtiPct !== null) {
     const dti = add(percent('Share of income going to debt payments with the cheapest offer', a.dtiPct, 'estimate'));

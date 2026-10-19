@@ -66,6 +66,27 @@ export function effectiveAprBps(principalCents: number, feeCents: number, aprBps
   return Math.round(((lo + hi) / 2) * 12 * 10_000);
 }
 
+/** Largest loan whose EMI fits in `emiCents` (inverse of emi, rounded down). */
+export function maxPrincipal(emiCents: number, aprBps: number, months: number): number {
+  if (emiCents <= 0 || months <= 0) return 0;
+  const r = monthlyRate(aprBps);
+  let p = Math.floor(r === 0 ? emiCents * months : (emiCents * (1 - (1 + r) ** -months)) / r);
+  while (p > 0 && emi(p, aprBps, months) > emiCents) p--; // emi rounds up; step down past the edge
+  return p;
+}
+
+/**
+ * How much the user can borrow: monthly room at 36% (healthy) and 43% (most lenders' limit) of
+ * income after existing debt payments, and the loan each buys at this rate and term.
+ */
+export function borrowCapacity(monthlyIncomeCents: number, existingMinimumsCents: number, aprBps: number, months: number) {
+  if (monthlyIncomeCents <= 0) return null;
+  const room = (pct: number) => Math.max(0, Math.floor((monthlyIncomeCents * pct) / 100) - existingMinimumsCents);
+  const safeEmiCents = room(36);
+  const maxEmiCents = room(43);
+  return { safeEmiCents, maxEmiCents, safePrincipalCents: maxPrincipal(safeEmiCents, aprBps, months), maxPrincipalCents: maxPrincipal(maxEmiCents, aprBps, months) };
+}
+
 export type DtiBand = 'healthy' | 'stretched' | 'risky' | 'unknown';
 
 /** Debt-to-income after the new loan: (new EMI + existing minimums) / average monthly income. */

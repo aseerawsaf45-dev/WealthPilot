@@ -11,6 +11,7 @@ import { RowActions } from '../RowActions';
 import { CountryCard, useCountryMacro } from './CountryCard';
 import { LineChart } from './LineChart';
 import { BanksCard } from './BanksCard';
+import { LoanTools, type OfferDraft } from './LoanTools';
 import { useToday } from '../../lib/dates';
 import type { LoanOffer } from '../../types/finance';
 
@@ -36,7 +37,8 @@ export function LoansPanel() {
   const { loanOffers, saveLoanOffer, deleteLoanOffer, takeLoan, debts, preferences } = useFinance();
   const { averages } = useInsights();
   const today = useToday();
-  const [editing, setEditing] = useState<LoanOffer | 'new' | null>(loanOffers.length ? null : 'new');
+  const [editing, setEditing] = useState<LoanOffer | 'new' | null>(null);
+  const [draft, setDraft] = useState<OfferDraft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [extra, setExtra] = useState(0);
   const [taking, setTaking] = useState<string | null>(null);
@@ -68,6 +70,28 @@ export function LoansPanel() {
         </button>
       </div>
 
+      {editing && <OfferForm key={editing === 'new' ? `new-${draftLender ?? ''}-${JSON.stringify(draft)}` : editing.id} offer={editing === 'new' ? null : editing} draftLender={editing === 'new' ? draftLender : null} draft={editing === 'new' ? draft : null} defaultCountry={selected?.country || preferences.region || null} onClose={() => { setEditing(null); setDraftLender(null); setDraft(null); }} onSave={async (o, id) => {
+        const saved = await saveLoanOffer(o, id);
+        if (saved) {
+          setEditing(null);
+          setDraftLender(null);
+          setDraft(null);
+          setSelectedId(saved.id);
+        }
+      }} />}
+
+      <LoanTools
+        country={country}
+        benchmarkPct={macroLoading ? undefined : macro?.lendingRatePct?.value}
+        incomeCents={averages.incomeCents}
+        minimumsCents={minimums}
+        onSaveAsOffer={(d) => {
+          setDraft(d);
+          setEditing('new');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
+
       <BanksCard
         country={country}
         purpose="loan"
@@ -78,14 +102,6 @@ export function LoansPanel() {
         }}
       />
 
-      {editing && <OfferForm key={editing === 'new' ? `new-${draftLender ?? ''}` : editing.id} offer={editing === 'new' ? null : editing} draftLender={editing === 'new' ? draftLender : null} defaultCountry={selected?.country || preferences.region || null} onClose={() => { setEditing(null); setDraftLender(null); }} onSave={async (o, id) => {
-        const saved = await saveLoanOffer(o, id);
-        if (saved) {
-          setEditing(null);
-          setDraftLender(null);
-          setSelectedId(saved.id);
-        }
-      }} />}
 
       {compared.length > 0 && (
         <section className="keel-card overflow-hidden" aria-label="Compare offers">
@@ -281,14 +297,14 @@ export function LoansPanel() {
   );
 }
 
-function OfferForm({ offer, draftLender, defaultCountry, onClose, onSave }: { offer: LoanOffer | null; draftLender?: string | null; defaultCountry: string | null; onClose: () => void; onSave: (o: Omit<LoanOffer, 'id' | 'updatedAt' | 'status' | 'debtId'>, id?: string) => Promise<void> }) {
+function OfferForm({ offer, draftLender, draft, defaultCountry, onClose, onSave }: { offer: LoanOffer | null; draftLender?: string | null; draft?: OfferDraft | null; defaultCountry: string | null; onClose: () => void; onSave: (o: Omit<LoanOffer, 'id' | 'updatedAt' | 'status' | 'debtId'>, id?: string) => Promise<void> }) {
   const [name, setName] = useState(offer?.name ?? '');
   const [lender, setLender] = useState(offer?.lender ?? draftLender ?? '');
-  const [amount, setAmount] = useState(offer ? fromMinor(offer.principalCents) : '');
-  const [apr, setApr] = useState(offer ? String(offer.aprBps / 100) : '');
-  const [term, setTerm] = useState(offer ? String(offer.termMonths) : '36');
+  const [amount, setAmount] = useState(offer ? fromMinor(offer.principalCents) : draft ? fromMinor(draft.principalCents) : '');
+  const [apr, setApr] = useState(offer ? String(offer.aprBps / 100) : draft ? String(draft.aprBps / 100) : '');
+  const [term, setTerm] = useState(offer ? String(offer.termMonths) : String(draft?.termMonths ?? 36));
   const [fee, setFee] = useState(offer ? fromMinor(offer.feeCents) : '');
-  const [purpose, setPurpose] = useState<LoanOffer['purpose']>(offer?.purpose ?? 'personal');
+  const [purpose, setPurpose] = useState<LoanOffer['purpose']>(offer?.purpose ?? draft?.purpose ?? 'personal');
   const [country, setCountry] = useState(offer?.country ?? defaultCountry ?? '');
   const [saving, setSaving] = useState(false);
   const countries = useMemo(() => countryOptions(), []);

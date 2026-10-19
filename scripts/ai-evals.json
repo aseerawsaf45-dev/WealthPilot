@@ -678,7 +678,8 @@
           "compare_loans"
         ],
         "answerIncludes": [
-          "no loan offers"
+          "no loan offers",
+          "comfortable loan payment"
         ]
       }
     },

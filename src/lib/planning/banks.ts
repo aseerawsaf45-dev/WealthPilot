@@ -78,6 +78,44 @@ export function mentions(title: string, bank: Pick<BankInfo, 'name' | 'aliases'>
 /** Match key for de-duplicating banks with near-identical names. */
 export const bankKey = (name: string) => norm(name);
 
+/** Bank types queried directly (a subclass walk times out for big countries like the US). */
+const BANK_TYPES = ['Q22687', 'Q848507', 'Q157963', 'Q2111088', 'Q568041', 'Q1641457', 'Q1553482', 'Q319845', 'Q7309198', 'Q1227557'];
+
+/** Wikidata SPARQL for a country's well-known banks; starting from the bank types keeps it to ~1–3 s. */
+/** `minLinks` = Wikipedia language editions required; small countries need 0 to list anything. */
+export function wikidataBankQuery(country: string, minLinks = 2): string {
+  return `SELECT ?bank ?name ?links (SAMPLE(?site) AS ?web) (SAMPLE(?pIso) AS ?parentIso) WHERE {
+  hint:Query hint:optimizer "None".
+  VALUES ?type { ${BANK_TYPES.map((t) => `wd:${t}`).join(' ')} }
+  ?bank wdt:P31 ?type.
+  ?bank wdt:P17 ?c.
+  ?c wdt:P297 "${country}".
+  ?bank wikibase:sitelinks ?links.
+  FILTER(?links >= ${minLinks})
+  FILTER NOT EXISTS { ?bank wdt:P576 ?end }
+  ?bank rdfs:label ?name FILTER(LANG(?name) = "en")
+  OPTIONAL { ?bank wdt:P856 ?site }
+  OPTIONAL { ?bank wdt:P749 ?parent. ?parent wdt:P17 ?pc. ?pc wdt:P297 ?pIso }
+} GROUP BY ?bank ?name ?links ORDER BY DESC(?links) LIMIT 40`;
+}
+
+/** SPARQL rows → banks (top 15, de-duplicated). A parent bank in another country makes it an international bank's local arm. */
+export function parseWikidataBanks(bindings: Array<Record<string, { value: string } | undefined>>, country: string): BankInfo[] {
+  const seen = new Set<string>();
+  const out: BankInfo[] = [];
+  for (const b of bindings) {
+    const name = b.name?.value ?? '';
+    const key = bankKey(name);
+    if (!name || !b.bank || !key || seen.has(key)) continue;
+    seen.add(key);
+    const parent = b.parentIso?.value ?? null;
+    const foreign = !!parent && parent !== country;
+    out.push({ id: b.bank.value.split('/').pop()!, name, website: b.web?.value ?? null, kind: foreign ? 'international' : 'local', hq: foreign ? parent : country, fame: Number(b.links?.value ?? 0), aliases: [] });
+    if (out.length === 15) break;
+  }
+  return out;
+}
+
 export interface BankPick {
   bank: BankInfo;
   articles: NewsArticle[];
@@ -95,7 +133,7 @@ export function rankBanks(banks: BankInfo[], news: NewsArticle[], purpose: 'loan
     const signal = signals.reduce((s, x) => s + x, 0);
     const worst = Math.min(0, ...signals);
     const reasons: string[] = [];
-    if (bank.kind === 'international') reasons.push(`International bank (headquartered in ${bank.hq}) seen in local news`);
+    if (bank.kind === 'international') reasons.push(bank.id.startsWith('gsib:') ? `International bank (headquartered in ${bank.hq}) seen in local news` : `Local arm of an international bank (based in ${bank.hq})`);
     if (bank.fame >= 15) reasons.push('Widely known (covered in many languages)');
     if (articles.length >= 3) reasons.push(`Busy in the news: ${articles.length} recent articles`);
     else if (articles.length) reasons.push(`${articles.length} recent article${articles.length === 1 ? '' : 's'}`);

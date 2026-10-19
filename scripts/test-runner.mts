@@ -1359,3 +1359,51 @@ describe('Copilot control of the Planner', async () => {
     assert.ok('clarify' in C.resolveCommand({ name: 'update_investment_plan', args: { name: 'Kids education', monthly: '9000' } }, data, 'invest more in kids education'), 'an amount the user never wrote is rejected');
   });
 });
+
+describe('Loans: borrowing room, calculator maths and bank lists', async () => {
+  const L = await import('../src/lib/planning/loans.ts');
+  const B = await import('../src/lib/planning/banks.ts');
+  const T = await import('../src/server/ai/tools.ts');
+  it('maxPrincipal is the largest loan whose payment fits', () => {
+    for (const [pay, apr, n] of [[50_000, 1100, 60], [123_45, 0, 12], [1_000_000, 899, 240]]) {
+      const p = L.maxPrincipal(pay, apr, n);
+      assert.ok(L.emi(p, apr, n) <= pay, 'fits');
+      assert.ok(L.emi(p + 1, apr, n) > pay || L.emi(p + 2, apr, n) > pay, 'largest (within rounding)');
+    }
+    assert.strictEqual(L.maxPrincipal(0, 1000, 12), 0);
+    assert.strictEqual(L.maxPrincipal(-5, 1000, 12), 0);
+  });
+  it('borrowCapacity leaves room for existing debt payments', () => {
+    const c = L.borrowCapacity(500_000, 100_000, 1000, 60)!;
+    assert.deepStrictEqual([c.safeEmiCents, c.maxEmiCents], [80_000, 115_000]);
+    assert.ok(c.safePrincipalCents < c.maxPrincipalCents);
+    assert.strictEqual(L.borrowCapacity(0, 0, 1000, 60), null);
+    assert.strictEqual(L.borrowCapacity(100_000, 90_000, 1000, 60)!.safeEmiCents, 0, 'never negative');
+  });
+  it('parses Wikidata banks and marks local arms of foreign banks as international', () => {
+    const v = (value: string) => ({ value });
+    const banks = B.parseWikidataBanks([
+      { bank: v('http://www.wikidata.org/entity/Q1'), name: v('Sonali Bank PLC'), links: v('20') },
+      { bank: v('http://www.wikidata.org/entity/Q2'), name: v('Sonali Bank'), links: v('3') },
+      { bank: v('http://www.wikidata.org/entity/Q3'), name: v('Standard Chartered Bangladesh'), links: v('5'), parentIso: v('GB') },
+    ], 'BD');
+    assert.deepStrictEqual(banks.map((b) => [b.id, b.kind, b.hq]), [['Q1', 'local', 'BD'], ['Q3', 'international', 'GB']]);
+    const picks = B.rankBanks(banks, [], 'loan');
+    assert.ok(picks.find((p) => p.bank.id === 'Q3')!.reasons[0].startsWith('Local arm of an international bank'));
+    assert.ok(picks.some((p) => p.group === 'worth'), 'no news still gives picks');
+  });
+  it('the bundled snapshot covers big and small countries', async () => {
+    const snap = (await import('../src/lib/planning/banks-snapshot.json', { with: { type: 'json' } })).default as { countries: Record<string, Array<{ name: string }>> };
+    for (const c of ['US', 'IN', 'BD', 'GB', 'DE', 'NG']) assert.ok((snap.countries[c]?.length ?? 0) >= 5, `${c} has banks`);
+    assert.ok(Object.keys(snap.countries).length >= 150);
+  });
+  it('the loans AI tool gives grounded borrowing facts before any offer', () => {
+    const month = (m: number) => `2026-${String(m).padStart(2, '0')}-05`;
+    const data = { currency: 'BDT', today: '2026-10-20', region: 'BD', macro: { BD: { lendingRatePct: { value: 11.5, year: 2025 } } }, transactions: [7, 8, 9].map((m, i) => ({ id: `s${i}`, financialDate: month(m), amountCents: 6_000_000, category: 'Salary', currency: 'BDT', isTransfer: false, merchant: 'Employer' })), budgets: [], goals: [], bills: [], debts: [{ name: 'Card', balanceCents: 1, aprPercent: 20, minimumPaymentCents: 500_000 }], loanOffers: [] } as never;
+    const out = T.runTool('compare_loans', {}, data);
+    const labels = out.facts.map((f) => f.label);
+    assert.ok(labels.includes('Average bank lending rate in your country'));
+    assert.ok(labels.some((l) => l.startsWith('Comfortable monthly loan payment')));
+    assert.ok(!/\d/.test(out.template.replace(/\{\{#\d+\}\}/g, '')), 'no digits outside placeholders');
+  });
+});
