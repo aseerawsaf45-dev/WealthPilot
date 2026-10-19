@@ -24,6 +24,11 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   allowedDevOrigins: ["192.168.0.100", "localhost", "127.0.0.1"],
+  experimental: {
+    // Limit worker processes during build so multi-core hosts (e.g. Hostinger with 44+ cores)
+    // do not exhaust container process/thread limits (Tokio os error 11 / SIGABRT) during page data collection.
+    cpus: process.env.NEXT_CPUS ? parseInt(process.env.NEXT_CPUS, 10) : 2,
+  },
   async headers() {
     return [
       {
