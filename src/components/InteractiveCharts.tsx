@@ -1,414 +1,9 @@
 'use client';
 
-import React, { useState, useId } from 'react';
-import { formatMoney } from '../lib/money';
+import React, { useState } from 'react';
+import { formatMoney, formatCompactMoney } from '../lib/money';
+import { useToday } from '../lib/dates';
 import { TrendingUp, ArrowUpRight, ShieldCheck, Sparkles, HelpCircle } from 'lucide-react';
-
-// ============================================================================
-// 1. Financial Health Score Equalizer Histogram Chart
-// ============================================================================
-export function FinancialHealthEqualizerChart() {
-  const [hoveredBarIndex, setHoveredBarIndex] = useState<number | null>(null);
-
-  // 70 fine equalizer bars representing rolling 70-day mathematical audit history
-  const totalBars = 70;
-  const bars = Array.from({ length: totalBars }, (_, i) => {
-    const fraction = i / totalBars;
-    let baseHeight = 25;
-    let zone = 'Historical';
-    let isEmerald = false;
-
-    if (fraction < 0.25) {
-      baseHeight = 20 + Math.sin(i * 0.8) * 12 + (i % 3) * 6;
-      zone = 'Pre-Reconciled';
-    } else if (fraction < 0.5) {
-      baseHeight = 35 + Math.sin(i * 0.7) * 15 + (i % 2) * 8;
-      zone = 'Stable Audit';
-    } else if (fraction < 0.72) {
-      baseHeight = 48 + Math.sin(i * 0.9) * 16 + (i % 4) * 6;
-      zone = 'Institutional';
-    } else {
-      // Emerald highlight zone (Current multi-week audited surplus streak)
-      baseHeight = 60 + Math.sin(i * 0.85) * 20 + (i % 3) * 10;
-      if (i > 56) baseHeight = Math.min(96, baseHeight + 14);
-      zone = i > 62 ? 'Prime Surplus' : 'Audited Growth';
-      isEmerald = true;
-    }
-
-    return {
-      index: i,
-      height: Math.round(Math.min(96, Math.max(16, baseHeight))),
-      isEmerald,
-      zone,
-      dayAgo: totalBars - i,
-      score: Math.round(15 + fraction * 83),
-    };
-  });
-
-  const activeBar = hoveredBarIndex !== null ? bars[hoveredBarIndex] : null;
-
-  return (
-    <div className="space-y-4">
-      {/* 4 Health Pillars Sub-Score Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 select-none">
-        <div className="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block">Liquidity Ratio</span>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-lg font-extrabold text-[#0F172A] font-money">96%</span>
-            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded">Optimal</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block">Debt Coverage</span>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-lg font-extrabold text-[#0F172A] font-money">98%</span>
-            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded">1.48% D/A</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block">Savings Velocity</span>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-lg font-extrabold text-[#0F172A] font-money">89%</span>
-            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded">74% Net</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block">Audit Integrity</span>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-lg font-extrabold text-emerald-800 font-money">100%</span>
-            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.2 rounded">Reconciled</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Interactive Bar Chart Area */}
-      <div className="relative h-44 sm:h-48 w-full flex items-end justify-between gap-[2px] sm:gap-[3px] pt-6 pb-2 px-1 border-b border-slate-200/70 overflow-hidden">
-        {/* Hover Tooltip */}
-        {activeBar && (
-          <div className="absolute top-1 left-1/2 -translate-x-1/2 z-20 pointer-events-none bg-[#0F172A] text-white px-3.5 py-1.5 rounded-full text-xs font-mono shadow-xl flex items-center gap-2">
-            <span className={activeBar.isEmerald ? 'text-emerald-400 font-bold' : 'text-slate-200'}>
-              T-{activeBar.dayAgo}d: {activeBar.zone} ({activeBar.score}% Health)
-            </span>
-            <span className="text-[10px] text-slate-400">• Minor Unit Audited</span>
-          </div>
-        )}
-
-        {bars.map((b) => {
-          const isHovered = hoveredBarIndex === b.index;
-          return (
-            <div
-              key={b.index}
-              onMouseEnter={() => setHoveredBarIndex(b.index)}
-              onMouseLeave={() => setHoveredBarIndex(null)}
-              className="flex-1 flex items-end h-full group cursor-pointer"
-            >
-              <div
-                className={`w-full rounded-t-sm transition-all duration-200 ${
-                  b.isEmerald
-                    ? isHovered
-                      ? 'bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.85)] scale-y-105'
-                      : 'bg-emerald-500 hover:bg-emerald-400'
-                    : isHovered
-                    ? 'bg-slate-600 scale-y-105'
-                    : 'bg-[#CBD5E1] hover:bg-[#94A3B8]'
-                }`}
-                style={{ height: `${b.height}%` }}
-              />
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Timeline Audit Markers */}
-      <div className="flex justify-between items-center px-1 text-[11px] font-mono text-slate-500 select-none">
-        <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-          T-60 Days
-        </span>
-        <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-          T-45 Days
-        </span>
-        <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-          T-30 Days
-        </span>
-        <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-          T-15 Days
-        </span>
-        <span className="px-3 py-0.5 rounded-full bg-emerald-600 text-white font-bold text-[10px] shadow-sm shadow-emerald-500/30 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-          <span>Today (Live)</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 2. Capital Velocity & Savings Card (Authentic Wealth Intelligence)
-// ============================================================================
-export function CapitalVelocityCard() {
-  return (
-    <div className="keel-card p-6 h-full flex flex-col justify-between hover:-translate-y-0.5 hover:shadow-xl transition-all duration-300">
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-            Capital Velocity & Savings
-          </span>
-          <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-300">
-            Top 5% Tier
-          </span>
-        </div>
-        <p className="text-xs text-slate-600 font-medium leading-relaxed mb-3">
-          Monthly net surplus converted directly into liquid savings and equity.
-        </p>
-        <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#0F172A] font-money flex items-baseline gap-2">
-          <span>74.1%</span>
-          <span className="text-xs font-sans text-emerald-600 font-bold">+8.65% MoM</span>
-        </div>
-      </div>
-
-      {/* Multi-tier Capital Flow bar */}
-      <div className="my-4 space-y-2">
-        <div className="w-full h-11 bg-slate-100 rounded-xl p-1 flex items-center justify-between relative overflow-hidden">
-          {/* Active Emerald Profit Gain Gradient Pill */}
-          <div className="w-[74%] h-full rounded-lg bg-gradient-to-r from-emerald-500/20 via-emerald-400/30 to-emerald-500/40 border border-emerald-400/70 flex items-center justify-between px-3">
-            <span className="text-[10px] font-bold text-emerald-950">Net Capital Saved</span>
-            <span className="text-[10px] font-bold font-mono text-emerald-800 bg-white/95 px-2 py-0.5 rounded-full shadow-xs border border-emerald-200">
-              +$4,338.77
-            </span>
-          </div>
-          {/* Outflow balance */}
-          <div className="w-[26%] h-full flex items-center justify-center text-[10px] font-mono font-semibold text-rose-700 bg-rose-50/70 rounded-r-lg border-l border-rose-200">
-            -$1.5k Burn
-          </div>
-        </div>
-      </div>
-
-      {/* Legend Pills */}
-      <div className="flex items-center justify-between text-[11px] text-slate-600 font-medium pt-2 border-t border-slate-100">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-xs" />
-          <span className="font-semibold text-slate-800">Retained (74%)</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
-          <span>Invested (16%)</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-          <span>Burn (10%)</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-export const ConfidenceIndicatorCard = CapitalVelocityCard;
-
-// ============================================================================
-// 3. Tier-1 Liquidity Reserve Gauge Card (Dark Frosted Glassmorphism)
-// ============================================================================
-export function LiquidityRunwayGaugeCard() {
-  const size = 160;
-  const strokeWidth = 14;
-  const radius = (size - strokeWidth) / 2;
-  const arcLength = Math.PI * radius; // 180 degrees semicircular arc
-  const activePercent = 82; // 82% of max 12-month runway capacity
-  const strokeDashoffset = arcLength * (1 - activePercent / 100);
-
-  return (
-    <div className="keel-card-dark p-6 h-full flex flex-col justify-between relative overflow-hidden group hover:-translate-y-0.5 hover:shadow-2xl transition-all duration-300">
-      {/* Ambient glow in corner */}
-      <div className="absolute -top-12 -right-12 w-36 h-36 bg-sky-500/20 blur-3xl pointer-events-none rounded-full" />
-
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            Tier-1 Liquidity Reserve
-          </span>
-          <span className="text-[10px] font-mono font-bold text-sky-400 bg-sky-950/80 px-2.5 py-0.5 rounded-full border border-sky-800/60">
-            170% Funded
-          </span>
-        </div>
-        <p className="text-xs text-slate-300 font-medium leading-relaxed mb-2">
-          Liquid cash & deposits relative to 6-month resilience target.
-        </p>
-        <div className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white font-money flex items-baseline gap-2">
-          <span>10.2 mo</span>
-          <span className="text-xs font-sans text-sky-400 font-semibold">$54.6k Cash</span>
-        </div>
-      </div>
-
-      {/* Semicircular Light Blue Arc Gauge */}
-      <div className="my-2 flex items-center justify-center relative">
-        <div className="w-40 h-24 overflow-hidden flex items-end justify-center relative">
-          <svg viewBox={`0 0 ${size} ${size / 2 + 10}`} className="w-40 h-28">
-            <defs>
-              <linearGradient id="lightBlueArc" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#0284C7" />
-                <stop offset="60%" stopColor="#0EA5E9" />
-                <stop offset="100%" stopColor="#38BDF8" />
-              </linearGradient>
-            </defs>
-
-            {/* Background Arc Track */}
-            <path
-              d={`M ${strokeWidth / 2} ${size / 2} A ${radius} ${radius} 0 0 1 ${size - strokeWidth / 2} ${size / 2}`}
-              fill="transparent"
-              stroke="rgba(255, 255, 255, 0.12)"
-              strokeWidth={strokeWidth}
-              strokeLinecap="round"
-            />
-
-            {/* Active Light Blue Glow Arc */}
-            <path
-              d={`M ${strokeWidth / 2} ${size / 2} A ${radius} ${radius} 0 0 1 ${size - strokeWidth / 2} ${size / 2}`}
-              fill="transparent"
-              stroke="url(#lightBlueArc)"
-              strokeWidth={strokeWidth}
-              strokeDasharray={arcLength}
-              strokeDashoffset={strokeDashoffset}
-              strokeLinecap="round"
-              className="transition-all duration-700 ease-out"
-              style={{
-                filter: 'drop-shadow(0 0 8px rgba(56, 189, 248, 0.5))',
-              }}
-            />
-          </svg>
-          <div className="absolute bottom-1 text-center">
-            <span className="text-[11px] font-mono text-sky-300 font-bold block">10.2 / 6 mo</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Legend Under Gauge */}
-      <div className="flex items-center justify-between text-[10px] text-slate-300 font-mono pt-2 border-t border-white/[0.08]">
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-sky-400" />
-          <span className="text-white font-medium">Checking ($6.4k)</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span>HYSA ($48.2k)</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-white/40" />
-          <span>Zero Debt Drag</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-export const DarkArcGaugeCard = LiquidityRunwayGaugeCard;
-
-// ============================================================================
-// 4. Market Trajectory & Net Worth Wave Chart (Bottom Right From Reference Image)
-// ============================================================================
-export function MarketTrajectoryWaveChart({
-  currentNetWorthCents,
-}: {
-  currentNetWorthCents: number;
-}) {
-  const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
-
-  // SVG wave geometry
-  const width = 600;
-  const height = 180;
-  const nodes = [
-    { x: 30, y: 120, label: 'May', val: 4780 },
-    { x: 120, y: 130, label: 'Jun', val: 4850 },
-    { x: 210, y: 125, label: 'Jul', val: 4920 },
-    { x: 300, y: 110, label: 'Aug', val: 5010 },
-    { x: 390, y: 85, label: 'Sep', val: 5120 },
-    { x: 480, y: 105, label: 'Oct', val: 5021 },
-    { x: 570, y: 90, label: 'Today', val: 5085 },
-  ];
-
-  // Generate upper and lower band paths
-  const upperD = `M ${nodes[0].x} ${nodes[0].y - 25} C 80 ${nodes[0].y - 30}, 160 ${nodes[1].y - 20}, ${nodes[2].x} ${nodes[2].y - 30} C 250 ${nodes[2].y - 35}, 340 ${nodes[3].y - 35}, ${nodes[4].x} ${nodes[4].y - 30} C 430 ${nodes[4].y - 25}, 520 ${nodes[5].y - 25}, ${nodes[6].x} ${nodes[6].y - 20}`;
-  const lowerD = `M ${nodes[0].x} ${nodes[0].y + 25} C 80 ${nodes[0].y + 30}, 160 ${nodes[1].y + 20}, ${nodes[2].x} ${nodes[2].y + 30} C 250 ${nodes[2].y + 35}, 340 ${nodes[3].y + 35}, ${nodes[4].x} ${nodes[4].y + 30} C 430 ${nodes[4].y + 25}, 520 ${nodes[5].y + 25}, ${nodes[6].x} ${nodes[6].y + 20}`;
-  const centerD = `M ${nodes[0].x} ${nodes[0].y} C 80 ${nodes[0].y}, 160 ${nodes[1].y}, ${nodes[2].x} ${nodes[2].y} C 250 ${nodes[2].y}, 340 ${nodes[3].y}, ${nodes[4].x} ${nodes[4].y} C 430 ${nodes[4].y}, 520 ${nodes[5].y}, ${nodes[6].x} ${nodes[6].y}`;
-
-  return (
-    <div className="keel-card p-6 h-full flex flex-col justify-between">
-      <div className="flex items-start justify-between">
-        <div>
-          <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-0.5">
-            S&P 500 & Portfolio Trajectory
-          </span>
-          <div className="text-3xl font-bold tracking-tight text-[#0F172A] font-money flex items-center gap-2">
-            <span>5,021.16</span>
-            <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-300 shadow-2xs">
-              +8.65%
-            </span>
-          </div>
-          <p className="text-xs text-neutral-600 mt-1 font-medium">
-            Overall market sentiment and ledger performance.
-          </p>
-        </div>
-
-        {/* Circular Action Button */}
-        <button className="w-8 h-8 rounded-full border border-black/[0.1] flex items-center justify-center text-neutral-700 hover:text-emerald-600 hover:border-emerald-300 transition-colors shadow-2xs cursor-pointer">
-          <ArrowUpRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* SVG Wave Chart with Vertical Dashed Nodes (Matching Reference Image) */}
-      <div className="relative w-full h-36 my-2">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
-          {/* Dashed vertical lines across nodes */}
-          {nodes.map((n, i) => (
-            <line
-              key={i}
-              x1={n.x}
-              y1={n.y - 40}
-              x2={n.x}
-              y2={n.y + 40}
-              stroke="rgba(0, 0, 0, 0.18)"
-              strokeDasharray="2 3"
-              strokeWidth="1.25"
-            />
-          ))}
-
-          {/* Upper Envelope Line */}
-          <path d={upperD} fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1" strokeDasharray="3 3" />
-          {/* Lower Envelope Line */}
-          <path d={lowerD} fill="none" stroke="rgba(0,0,0,0.22)" strokeWidth="1" strokeDasharray="3 3" />
-
-          {/* Center Main Trajectory Line */}
-          <path d={centerD} fill="none" stroke="#0F172A" strokeWidth="2.5" strokeLinecap="round" />
-
-          {/* Key Black Dots at Nodes */}
-          {nodes.map((n, i) => (
-            <circle key={i} cx={n.x} cy={n.y} r={3.5} fill="#0F172A" />
-          ))}
-
-          {/* Highlight Green Profit Pill Marker (Matching Reference 8.65% Pill) */}
-          <g transform="translate(440, 70)">
-            <rect
-              x="-24"
-              y="-12"
-              width="50"
-              height="22"
-              rx="11"
-              fill="#10B981"
-              filter="drop-shadow(0 2px 8px rgba(16, 185, 129, 0.45))"
-            />
-            <text
-              x="1"
-              y="3"
-              textAnchor="middle"
-              fill="#FFFFFF"
-              fontSize="10"
-              fontWeight="bold"
-              fontFamily="monospace"
-            >
-              8.65%
-            </text>
-          </g>
-        </svg>
-      </div>
-    </div>
-  );
-}
 
 // ============================================================================
 // 5. Asset Allocation & Liquidity Stacked Breakdown Chart
@@ -558,146 +153,77 @@ export function AssetAllocationChart({
 // 6. Debt Payoff Trajectory Chart (Avalanche vs Snowball curves)
 // ============================================================================
 interface DebtPayoffTrajectoryChartProps {
-  debts?: DebtAccount[];
-  totalDebtCents?: number;
+  /** Total remaining balance per month from calculateDebtPayoffSchedule (index 0 = today). */
+  snowballBalances: number[];
+  avalancheBalances: number[];
   snowballMonths: number;
   avalancheMonths: number;
-  extraPaymentDollars: number;
+  extraPaymentCents: number;
   interestSavedCents: number;
 }
 
-export function DebtPayoffTrajectoryChart({
-  debts,
-  totalDebtCents,
-  snowballMonths,
-  avalancheMonths,
-  extraPaymentDollars,
-  interestSavedCents,
-}: DebtPayoffTrajectoryChartProps) {
-  const maxMonths = Math.max(snowballMonths, avalancheMonths, 12);
-  const totalDebt = totalDebtCents ?? (debts ? debts.reduce((sum, d) => sum + d.balanceCents, 0) : 0);
-
-  // Generate curve coordinates
+/** Real payoff curves: the simulated month-by-month balance for each strategy. */
+export function DebtPayoffTrajectoryChart({ snowballBalances, avalancheBalances, snowballMonths, avalancheMonths, extraPaymentCents, interestSavedCents }: DebtPayoffTrajectoryChartProps) {
+  const maxMonths = Math.max(snowballBalances.length - 1, avalancheBalances.length - 1, 1);
+  const top = Math.max(1, ...snowballBalances, ...avalancheBalances);
   const width = 640;
   const height = 180;
   const padding = 30;
+  const toPts = (balances: number[]) =>
+    balances.map((b, m) => ({ x: padding + (m / maxMonths) * (width - padding * 2), y: height - padding - (b / top) * (height - padding * 2) }));
+  const avalanchePts = toPts(avalancheBalances);
+  const snowballPts = toPts(snowballBalances);
+  const ptsToPath = (pts: { x: number; y: number }[]) => pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, '');
+  const monthsFaster = Math.abs(snowballMonths - avalancheMonths);
 
-  // Coordinate mapper
-  const getCoords = (months: number) => {
-    const pts: { x: number; y: number }[] = [];
-    const steps = 10;
-    for (let i = 0; i <= steps; i++) {
-      const frac = i / steps;
-      const m = frac * months;
-      const x = padding + (m / maxMonths) * (width - padding * 2);
-      // Exponential decay payoff curve
-      const remainingBalanceRatio = Math.max(0, 1 - Math.pow(frac, 1.25));
-      const y = height - padding - remainingBalanceRatio * (height - padding * 2);
-      pts.push({ x, y });
-    }
-    return pts;
-  };
-
-  const avalanchePts = getCoords(avalancheMonths);
-  const snowballPts = getCoords(snowballMonths);
-
-  const ptsToPath = (pts: { x: number; y: number }[]) => {
-    return pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, '');
-  };
+  if (avalancheBalances.length < 2) {
+    return <p className="text-xs text-slate-500 font-medium">Add a debt to see its payoff curve.</p>;
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-0.5">
-            Algorithmic Payoff Simulator
-          </span>
-          <h4 className="text-lg font-bold tracking-tight text-[#0F172A]">
-            Debt Freedom Trajectory Curves
-          </h4>
+          <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider block mb-0.5">Payoff simulator</span>
+          <h4 className="text-lg font-bold tracking-tight text-[#0F172A]">Total debt over time</h4>
         </div>
-
-        {/* Highlight pill: Interest Saved (Green/Profit) */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-300">
-            +{formatMoney(interestSavedCents)} Interest Saved
-          </span>
-          <span className="text-xs font-mono font-medium text-neutral-600">
-            {Math.abs(snowballMonths - avalancheMonths)} Months Faster
-          </span>
+          <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-300">+{formatMoney(interestSavedCents)} interest saved</span>
+          {monthsFaster > 0 && <span className="text-xs font-mono font-medium text-neutral-600">{monthsFaster} month{monthsFaster === 1 ? '' : 's'} sooner</span>}
         </div>
       </div>
 
-      {/* SVG Curve Canvas */}
       <div className="relative w-full h-44 bg-neutral-50/50 rounded-2xl border border-black/[0.05] p-3 overflow-hidden">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
-          {/* Subtle horizontal grid lines */}
-          {[0.25, 0.5, 0.75].map((pct, i) => (
-            <line
-              key={i}
-              x1={padding}
-              y1={padding + pct * (height - padding * 2)}
-              x2={width - padding}
-              y2={padding + pct * (height - padding * 2)}
-              stroke="rgba(0,0,0,0.06)"
-              strokeDasharray="4 4"
-            />
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible" role="img" aria-label={`Avalanche pays off in ${avalancheMonths} months, snowball in ${snowballMonths} months`}>
+          {[0.25, 0.5, 0.75].map((pct) => (
+            <line key={pct} x1={padding} y1={padding + pct * (height - padding * 2)} x2={width - padding} y2={padding + pct * (height - padding * 2)} stroke="rgba(0,0,0,0.06)" strokeDasharray="4 4" />
           ))}
-
-          {/* Snowball Curve (Neutral Slate / Dashed) */}
-          <path
-            d={ptsToPath(snowballPts)}
-            fill="none"
-            stroke="#94A3B8"
-            strokeWidth="2.5"
-            strokeDasharray="4 4"
-          />
-
-          {/* Avalanche Curve (Vibrant Light Blue) */}
-          <path
-            d={ptsToPath(avalanchePts)}
-            fill="none"
-            stroke="#0EA5E9"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-
-          {/* Freedom Endpoints */}
-          {avalanchePts.length > 0 && (
-            <g transform={`translate(${avalanchePts[avalanchePts.length - 1].x}, ${avalanchePts[avalanchePts.length - 1].y})`}>
-              <circle r="5" fill="#0EA5E9" />
-              <text x="0" y="-10" textAnchor="middle" fontSize="10" fontWeight="bold" fill="#0EA5E9">
-                {avalancheMonths} mo (Avalanche)
-              </text>
-            </g>
-          )}
-
-          {snowballPts.length > 0 && (
-            <g transform={`translate(${snowballPts[snowballPts.length - 1].x}, ${snowballPts[snowballPts.length - 1].y})`}>
-              <circle r="4" fill="#94A3B8" />
-              <text x="0" y="18" textAnchor="middle" fontSize="9" fontWeight="medium" fill="#64748B">
-                {snowballMonths} mo (Snowball)
-              </text>
-            </g>
-          )}
+          <text x={padding} y={padding - 8} fontSize="9" fill="#94A3B8">{formatCompactMoney(top)}</text>
+          <path d={ptsToPath(snowballPts)} fill="none" stroke="#94A3B8" strokeWidth="2.5" strokeDasharray="4 4" pathLength={1} className="wp-draw" />
+          <path d={ptsToPath(avalanchePts)} fill="none" stroke="#0EA5E9" strokeWidth="3" strokeLinecap="round" pathLength={1} className="wp-draw" />
+          <g transform={`translate(${avalanchePts[avalanchePts.length - 1].x}, ${avalanchePts[avalanchePts.length - 1].y})`}>
+            <circle r="5" fill="#0EA5E9" />
+            <text x="0" y="-10" textAnchor="middle" fontSize="10" fontWeight="bold" fill="#0EA5E9">{avalancheMonths} mo (Avalanche)</text>
+          </g>
+          <g transform={`translate(${snowballPts[snowballPts.length - 1].x}, ${snowballPts[snowballPts.length - 1].y})`}>
+            <circle r="4" fill="#94A3B8" />
+            <text x="0" y="18" textAnchor="middle" fontSize="9" fill="#64748B">{snowballMonths} mo (Snowball)</text>
+          </g>
         </svg>
       </div>
 
-      {/* Legend */}
-      <div className="flex items-center justify-between text-xs text-neutral-500 pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 pt-1">
         <div className="flex items-center gap-4">
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-1 rounded-full bg-sky-500" />
-            <strong className="text-neutral-700">Avalanche Strategy</strong> (Optimizes APR)
+            <strong className="text-neutral-700">Avalanche</strong> (highest APR first)
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-1 rounded-full bg-neutral-400" />
-            <span>Snowball Strategy (Smallest Balance)</span>
+            <span>Snowball (smallest balance first)</span>
           </span>
         </div>
-        <span className="text-[11px] font-mono text-neutral-400">
-          With ${extraPaymentDollars}/mo extra accelerated payment
-        </span>
+        <span className="text-[11px] font-mono text-neutral-400">With {formatMoney(extraPaymentCents)}/mo extra</span>
       </div>
     </div>
   );
@@ -710,7 +236,7 @@ export function CashFlowRhythmChart({
   transactions,
   selectedDate,
   onSelectDate,
-  currency = 'BDT',
+  currency,
 }: {
   transactions: Transaction[];
   selectedDate?: string | null;
@@ -719,10 +245,11 @@ export function CashFlowRhythmChart({
 }) {
   const [hoveredDay, setHoveredDay] = useState<string | null>(null);
 
-  // Group last 14 days of activity
+  // Group last 14 days of activity (calendar days in the user's timezone)
+  const today = useToday();
   const days = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (13 - i));
+    const d = new Date(`${today}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - (13 - i));
     const dateStr = d.toISOString().split('T')[0];
     const dayTxs = transactions.filter((t) => t.financialDate === dateStr);
     const income = dayTxs.filter((t) => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
@@ -909,9 +436,10 @@ export function BudgetPacingGaugeChart({ budgets }: { budgets: BudgetCategory[] 
   const overallPercent = totalAllocatedCents > 0 ? Math.round((totalSpentCents / totalAllocatedCents) * 100) : 0;
 
   // Day of month elapsed fraction (e.g. 16th / 31)
-  const now = new Date();
-  const dayOfMonth = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const today = useToday();
+  const [ty, tm, td] = today.split('-').map(Number);
+  const dayOfMonth = td;
+  const daysInMonth = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
   const monthElapsedPercent = Math.round((dayOfMonth / daysInMonth) * 100);
 
   const isUnderPace = overallPercent <= monthElapsedPercent;
@@ -993,19 +521,30 @@ export function BillsDrainTimelineChart({
   bills: BillSubscription[];
   checkingBalanceCents: number;
 }) {
-  const totalBillsCents = bills.reduce((s, b) => s + b.amountCents, 0);
 
-  // Generate 30 days projection
+  // Next 30 days from today: every due date of every active bill, following its frequency.
+  const today = useToday();
+  const dueOn = new Map<string, number[]>();
+  const end = new Date(`${today}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 29);
+  const endYmd = end.toISOString().slice(0, 10);
+  for (const b of bills) {
+    if (b.status === 'paused' || !b.nextDueDate) continue;
+    const d = new Date(`${b.nextDueDate}T00:00:00Z`);
+    for (let i = 0; i < 40 && d.toISOString().slice(0, 10) <= endYmd; i++) {
+      const ymd = d.toISOString().slice(0, 10);
+      if (ymd >= today) dueOn.set(ymd, [...(dueOn.get(ymd) ?? []), b.amountCents]);
+      if (b.frequency === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+      else d.setUTCMonth(d.getUTCMonth() + (b.frequency === 'monthly' ? 1 : b.frequency === 'quarterly' ? 3 : 12));
+    }
+  }
   const days = Array.from({ length: 30 }, (_, i) => {
-    const day = i + 1;
-    // Find bills due on this day
-    const dayBills = bills.filter((b) => {
-      const due = new Date(b.nextDueDate).getDate();
-      return due === day;
-    });
-    const drain = dayBills.reduce((s, b) => s + b.amountCents, 0);
-    return { day, drain, billCount: dayBills.length };
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + i);
+    const amounts = dueOn.get(d.toISOString().slice(0, 10)) ?? [];
+    return { day: d.getUTCDate(), drain: amounts.reduce((s, a) => s + a, 0), billCount: amounts.length };
   });
+  const totalBillsCents = days.reduce((s, d) => s + d.drain, 0);
 
   return (
     <div className="keel-card p-6 space-y-5">
@@ -1046,7 +585,7 @@ export function BillsDrainTimelineChart({
               <div className="text-[10px] font-mono font-medium">Day {d.day}</div>
               {hasBills ? (
                 <div className="text-[11px] font-bold font-money text-rose-700 mt-0.5 truncate">
-                  -${Math.round(d.drain / 100)}
+                  -{formatCompactMoney(d.drain)}
                 </div>
               ) : (
                 <div className="text-[10px] text-neutral-400 mt-0.5">-</div>

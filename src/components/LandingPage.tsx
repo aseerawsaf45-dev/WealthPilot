@@ -51,8 +51,8 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
 
   const faqs = [
     {
-      q: 'How does WealthPilot guarantee 100% privacy without telemetry?',
-      a: 'WealthPilot operates entirely within your browser client storage enclave (LocalStorage and IndexedDB). No financial data, account numbers, balances, or transaction memos are ever uploaded or transmitted to remote cloud databases. You retain total mathematical sovereignty.',
+      q: 'Where is my data stored, and who can see it?',
+      a: 'When you sign in, your ledger is stored in an encrypted PostgreSQL database (Neon) and every request is checked against your own session, so no one else can read it. Uploaded receipts and statements are read on your device; the files themselves are never uploaded. AI is off until you turn it on, and even then it only sees labels, never your amounts. The demo needs no account: demo data stays in your browser tab.',
     },
     {
       q: 'What is the "Minor-Unit Integer Accounting" engine?',
@@ -60,11 +60,11 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
     },
     {
       q: 'Can I import and export my existing records without lock-in?',
-      a: 'Yes! You can import standard bank CSVs with custom column mapping, and export either a sanitized formula-injection-safe CSV (neutralizing =, +, -, @ exploits) or a full database-ready JSON archive at any time with a single click.',
+      a: 'Yes. Drop in bank CSV or Excel exports, PDF statements or receipt photos: everything is read on your device and shown for review before saving, and every import can be undone. Export a formula-injection-safe CSV or a full JSON archive of all your data at any time.',
     },
     {
-      q: 'Does WealthPilot support Bangladeshi Taka (৳) and other currencies?',
-      a: 'Yes. WealthPilot natively supports multi-currency configurations including Bangladeshi Taka (৳ BDT), US Dollar ($ USD), Euro (€ EUR), British Pound (£ GBP), and Japanese Yen (¥ JPY), with dedicated regional discounts and perks tailored to your location.',
+      q: 'Which currencies are supported?',
+      a: 'All active ISO 4217 currencies (150+), each with its correct decimals (Japanese yen has none, Kuwaiti dinar has three). Every account keeps its own currency; totals and net worth are converted to your main currency at the daily market rate and labelled as estimates.',
     },
     {
       q: 'Is WealthPilot free to use?',
@@ -165,7 +165,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
 
         {/* Hero Subtitle */}
         <p className="text-base sm:text-xl text-slate-600 font-medium max-w-2xl mx-auto mt-6 leading-relaxed">
-          Traditional budgeting apps leak your personal financial records and drift with floating-point errors. WealthPilot delivers client-enclave mathematical certainty, autonomous runway forecasting, and verified regional perks.
+          Traditional budgeting apps leak your personal financial records and drift with floating-point errors. WealthPilot gives you exact integer accounting in 150+ currencies, AI insights on every page, and receipt and statement scanning that runs on your own device.
         </p>
 
         {/* Hero Dual CTA Buttons */}
@@ -184,7 +184,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
             onClick={onLaunchApp}
             className="w-full sm:w-auto px-7 py-3.5 rounded-full bg-white hover:bg-slate-50 border border-slate-200/90 text-slate-800 text-sm font-bold shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>Explore Live Sandbox Demo</span>
+            <span>Try the demo (no account)</span>
             <Sparkles className="w-4 h-4 text-sky-600" />
           </button>
         </div>
@@ -193,7 +193,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
         <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-8 mt-8 text-xs font-semibold text-slate-500">
           <div className="flex items-center gap-1.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Zero cloud databases</span>
+            <span>Encrypted, private by default</span>
           </div>
           <div className="flex items-center gap-1.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -220,7 +220,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
                   <div className="w-3 h-3 rounded-full bg-amber-400" />
                   <div className="w-3 h-3 rounded-full bg-emerald-400" />
                   <span className="ml-2 text-xs font-mono font-bold text-slate-400">
-                    wealthpilot.local / client-enclave
+                    Example dashboard · sample numbers
                   </span>
                 </div>
 
@@ -307,10 +307,10 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 grid grid-cols-2 lg:grid-cols-4 gap-8 text-center">
           <div>
             <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F172A]">
-              ৳ 120M+
+              150+
             </div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">
-              Minor Units Reconciled
+              Currencies supported
             </div>
           </div>
           <div>
@@ -323,18 +323,18 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
           </div>
           <div>
             <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F172A]">
-              100%
+              On-device
             </div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">
-              Local Browser Enclave
+              Receipt &amp; statement reading
             </div>
           </div>
           <div>
             <div className="text-3xl sm:text-4xl font-extrabold tracking-tight text-sky-600">
-              14,000+
+              Opt-in
             </div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">
-              Active Personal Pilots
+              AI that never sees your amounts
             </div>
           </div>
         </div>
@@ -531,15 +531,15 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
                 <ShieldCheck className="w-5 h-5" />
               </div>
               <h3 className="text-xl font-bold text-[#0F172A] tracking-tight mb-2">
-                100% Client-Side Enclave
+                Private by design
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                Your data stays exclusively inside your browser sandbox. We have no analytics servers harvesting your salary, bank balance, or spending habits.
+                Every query is scoped to your own account, no analytics trackers, and files you scan are read on your device. AI is opt-in and only ever sees labels like &ldquo;Dining spending&rdquo;, never the amounts.
               </p>
             </div>
             <div className="mt-6 flex items-center gap-2 text-xs font-bold text-emerald-800">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              <span>Zero Remote Storage Logs</span>
+              <span>Tamper-evident audit log of every change</span>
             </div>
           </div>
 
@@ -550,15 +550,15 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
                 <Tag className="w-5 h-5" />
               </div>
               <h3 className="text-xl font-bold text-[#0F172A] tracking-tight mb-2">
-                Verified Local Merchant Offers
+                AI insights on every page
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                No fake coupon affiliate redirects. Directly verified offers for Bangladesh (`৳`) and Global markets with verifiable source links and transparent fallbacks.
+                Unusual charges, recurring payments, a 30/60/90-day cash forecast, budget pacing and goal dates, all calculated from your own history and explained in plain language.
               </p>
             </div>
             <div className="mt-6 flex items-center gap-2 text-xs font-bold text-slate-700">
               <Globe2 className="w-4 h-4 text-sky-600" />
-              <span>Region Switcher Enabled</span>
+              <span>Works without AI too: calculated answers</span>
             </div>
           </div>
 
@@ -621,14 +621,14 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
               <tbody className="divide-y divide-slate-100 font-medium">
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
-                    Zero Remote Telemetry (Client Enclave)
+                    Receipts &amp; statements read on your device
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
-                    ✓ 100% Local Only
+                    ✓ Files never uploaded
                   </td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Uploaded to cloud</td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Stored on AWS</td>
-                  <td className="py-3.5 px-4 text-emerald-600">✓ If kept offline</td>
+                  <td className="py-3.5 px-4 text-slate-400">Varies</td>
+                  <td className="py-3.5 px-4 text-slate-400">Varies</td>
+                  <td className="py-3.5 px-4 text-slate-400">Manual entry</td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
@@ -681,63 +681,25 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
       </section>
 
       {/* =========================================================================
-          TESTIMONIALS
+          HOW YOUR DATA AND AI ARE HANDLED (facts, not testimonials)
           ========================================================================= */}
       <section className="py-24 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
         <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F172A]">
-            Endorsed by security architects and financial engineers.
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-2">
-            What early users say about adopting a local-first ledger.
-          </p>
+          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#0F172A]">How your data and the AI are handled</h2>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-2">Exactly what happens, in plain words.</p>
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="keel-card p-6 flex flex-col justify-between">
-            <p className="text-xs sm:text-sm text-slate-700 font-medium leading-relaxed italic">
-              &ldquo;I refused to use Plaid-based budgeting apps that scrape my banking credentials. WealthPilot gave me an institutional-grade ledger with exact integer math and zero data leaving my MacBook.&rdquo;
-            </p>
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center">
-                T
-              </div>
-              <div>
-                <div className="text-xs font-bold text-[#0F172A]">Tanvir Ahmed</div>
-                <div className="text-[11px] text-slate-500">Principal Systems Engineer, Dhaka</div>
-              </div>
+          {[
+            { t: 'Numbers come from WealthPilot', d: 'Every total, forecast and plan is calculated on our server from your ledger in exact integer units. The AI only words the answer; if it writes a number of its own, its wording is discarded.' },
+            { t: 'AI sees labels, not amounts', d: 'With AI on, the provider receives your question and result names like “Dining spending”. Amounts, balances, account numbers, your name and email are never sent.' },
+            { t: 'Scanning stays on your device', d: 'Receipt photos, PDFs and spreadsheets are read in your browser. Only if you allow document reading is the text (with card, account and phone numbers removed) sent to structure it, and you review every row.' },
+          ].map((c) => (
+            <div key={c.t} className="keel-card wp-lift p-6">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              <h3 className="mt-3 text-sm font-bold text-[#0F172A]">{c.t}</h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">{c.d}</p>
             </div>
-          </div>
-
-          <div className="keel-card p-6 flex flex-col justify-between">
-            <p className="text-xs sm:text-sm text-slate-700 font-medium leading-relaxed italic">
-              &ldquo;The autonomous runway sizer and integer precision engine are unmatched. Seeing my exact burn rate in Bangladeshi Taka without annoying popups or cloud syncing delays is refreshing.&rdquo;
-            </p>
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">
-                F
-              </div>
-              <div>
-                <div className="text-xs font-bold text-[#0F172A]">Farhana Yasmin</div>
-                <div className="text-[11px] text-slate-500">Quantitative Analyst, London</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="keel-card p-6 flex flex-col justify-between">
-            <p className="text-xs sm:text-sm text-slate-700 font-medium leading-relaxed italic">
-              &ldquo;The Finance Academy with daily streaks and XP made financial literacy genuinely rewarding. Plus, having one-click sanitized CSV exports protects our spreadsheets from formula injection.&rdquo;
-            </p>
-            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
-                R
-              </div>
-              <div>
-                <div className="text-xs font-bold text-[#0F172A]">Rashed Chowdhury</div>
-                <div className="text-[11px] text-slate-500">Fintech Founder & Angel Investor</div>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 

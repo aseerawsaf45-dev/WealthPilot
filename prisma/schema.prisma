@@ -22,37 +22,38 @@ datasource db {
 // -----------------------------------------------------------------------------
 
 model User {
-  id                String    @id @default(cuid())
-  name              String?
-  email             String    @unique
-  emailVerified     DateTime?
-  image             String?
-  passwordHash      String?   // Salted hash for credentials auth (Argon2id/Bcrypt)
-  preferredCurrency String    @default("USD") // "USD" or "BDT"
-  timezone          String    @default("UTC")
-  isAiEnabled       Boolean   @default(false) // Opt-in; only /user/ai-consent writes it (SEC-11)
-  aiConsentAt       DateTime?
-  aiConsentVersion  String?
-  aiProviders       String[]  @default([])
-  chatHistoryEnabled Boolean  @default(false)
-  region            String?   // ISO-3166 alpha-2, user-declared; null = most restrictive rules
-  uiPrefs           Json      @default("{}") // theme, locale, dateFormat, reducedMotion, isDemoMode: UI-only
-  passwordChangedAt DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  name               String?
+  email              String    @unique
+  emailVerified      DateTime?
+  image              String?
+  passwordHash       String? // Salted hash for credentials auth (Argon2id/Bcrypt)
+  preferredCurrency  String    @default("USD") // any ISO 4217 code (src/lib/currency.ts)
+  timezone           String    @default("UTC")
+  isAiEnabled        Boolean   @default(false) // Opt-in; only /user/ai-consent writes it (SEC-11)
+  aiConsentAt        DateTime?
+  aiConsentVersion   String?
+  aiProviders        String[]  @default([])
+  chatHistoryEnabled Boolean   @default(false)
+  region             String? // ISO-3166 alpha-2, user-declared; null = most restrictive rules
+  uiPrefs            Json      @default("{}") // theme, locale, dateFormat, reducedMotion, isDemoMode: UI-only
+  passwordChangedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   // Relational Integrity & GDPR Art. 17 Cascading Erasure
-  accounts          FinancialAccount[]
-  transactions      Transaction[]
-  budgets           BudgetCategory[]
-  savingsGoals      SavingsGoal[]
-  bills             BillSubscription[]
-  debts             DebtAccount[]
-  auditLogs         AuditEvent[]
-  copilotMessages   CopilotMessage[]
+  accounts             FinancialAccount[]
+  transactions         Transaction[]
+  budgets              BudgetCategory[]
+  savingsGoals         SavingsGoal[]
+  bills                BillSubscription[]
+  debts                DebtAccount[]
+  auditLogs            AuditEvent[]
+  copilotMessages      CopilotMessage[]
   copilotConversations CopilotConversation[]
-  sessions          Session[]
-  merchantRules     MerchantRule[]
+  sessions             Session[]
+  merchantRules        MerchantRule[]
+  pageInsights         PageInsight[]
 
   @@map("users")
 }
@@ -71,24 +72,24 @@ enum AccountType {
 }
 
 model FinancialAccount {
-  id                    String        @id @default(cuid())
-  userId                String
-  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                  String
-  institution           String
-  type                  AccountType   @default(CHECKING)
-  currency              String        @default("USD")
-  balanceCents          BigInt        @default(0) // Legacy cache; the API derives balance = opening + SUM(non-VOID tx)
-  openingBalanceCents   BigInt        @default(0)
-  accountNumberMask     String        // GLBA 16 CFR § 314.4 compliant (e.g. "•••• 4821")
-  isManual              Boolean       @default(true)
-  isIncludedInNetWorth  Boolean       @default(true)
-  lastSyncedAt          DateTime      @default(now())
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  id                   String      @id @default(cuid())
+  userId               String
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                 String
+  institution          String
+  type                 AccountType @default(CHECKING)
+  currency             String      @default("USD")
+  balanceCents         BigInt      @default(0) // Legacy cache; the API derives balance = opening + SUM(non-VOID tx)
+  openingBalanceCents  BigInt      @default(0)
+  accountNumberMask    String // GLBA 16 CFR § 314.4 compliant (e.g. "•••• 4821")
+  isManual             Boolean     @default(true)
+  isIncludedInNetWorth Boolean     @default(true)
+  lastSyncedAt         DateTime    @default(now())
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
 
-  transactions          Transaction[]
-  bills                 BillSubscription[]
+  transactions Transaction[]
+  bills        BillSubscription[]
 
   @@index([userId])
   @@map("financial_accounts")
@@ -113,46 +114,46 @@ enum TransactionSource {
 }
 
 model Transaction {
-  id                    String              @id @default(cuid())
-  userId                String
-  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accountId             String
-  account               FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  financialDate         String              // YYYY-MM-DD
-  postedAt              DateTime            @default(now())
-  merchant              String
-  normalizedMerchant    String
-  category              String
-  amountCents           BigInt              // Minor-units (Inflow > 0, Outflow < 0)
-  currency              String              @default("USD")
-  status                TransactionStatus   @default(CLEARED)
-  isTransfer            Boolean             @default(false)
-  linkedTransferId      String?             // For transfer pairing
-  source                TransactionSource   @default(MANUAL)
-  importFingerprint     String?             // sha256, CSV_IMPORT rows only; NULL when voided
-  importBatchId         String?
-  notes                 String?
-  tags                  String[]            @default([])
-  createdAt             DateTime            @default(now())
-  updatedAt             DateTime            @updatedAt
+  id                 String            @id @default(cuid())
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId          String
+  account            FinancialAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  financialDate      String // YYYY-MM-DD
+  postedAt           DateTime          @default(now())
+  merchant           String
+  normalizedMerchant String
+  category           String
+  amountCents        BigInt // Minor-units (Inflow > 0, Outflow < 0)
+  currency           String            @default("USD")
+  status             TransactionStatus @default(CLEARED)
+  isTransfer         Boolean           @default(false)
+  linkedTransferId   String? // For transfer pairing
+  source             TransactionSource @default(MANUAL)
+  importFingerprint  String? // sha256, CSV_IMPORT rows only; NULL when voided
+  importBatchId      String?
+  notes              String?
+  tags               String[]          @default([])
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
 
-  splits                TransactionSplit[]
+  splits TransactionSplit[]
 
+  @@unique([userId, importFingerprint])
   @@index([userId, financialDate])
   @@index([userId, category])
   @@index([accountId])
-  @@unique([userId, importFingerprint])
   @@index([userId, importBatchId])
   @@map("transactions")
 }
 
 model TransactionSplit {
-  id              String        @id @default(cuid())
-  transactionId   String
-  transaction     Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  category        String
-  amountCents     BigInt        // Split minor-unit allocation
-  note            String?
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  category      String
+  amountCents   BigInt // Split minor-unit allocation
+  note          String?
 
   @@index([transactionId])
   @@map("transaction_splits")
@@ -163,16 +164,16 @@ model TransactionSplit {
 // -----------------------------------------------------------------------------
 
 model BudgetCategory {
-  id                    String    @id @default(cuid())
+  id                    String   @id @default(cuid())
   userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   category              String
-  allocatedCents        BigInt    // Spending ceiling in cents
-  monthYear             String    // YYYY-MM
-  rolloverEnabled       Boolean   @default(false)
-  alertThresholdPercent Int       @default(85)
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  allocatedCents        BigInt // Spending ceiling in cents
+  monthYear             String // YYYY-MM
+  rolloverEnabled       Boolean  @default(false)
+  alertThresholdPercent Int      @default(85)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@unique([userId, category, monthYear])
   @@index([userId])
@@ -184,20 +185,20 @@ model BudgetCategory {
 // -----------------------------------------------------------------------------
 
 model SavingsGoal {
-  id                  String    @id @default(cuid())
-  userId              String
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name                String
-  targetCents         BigInt
-  currentCents        BigInt    @default(0)
-  targetDate          String?   // YYYY-MM-DD (optional for flexible milestones)
-  category            String
-  priority            String    @default("medium") // low | medium | high
-  isPaused            Boolean   @default(false)
-  plan                Json?     // latest AI goal plan snapshot (what the plan dialog renders); history not kept
-  planUpdatedAt       DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name          String
+  targetCents   BigInt
+  currentCents  BigInt    @default(0)
+  targetDate    String? // YYYY-MM-DD (optional for flexible milestones)
+  category      String
+  priority      String    @default("medium") // low | medium | high
+  isPaused      Boolean   @default(false)
+  plan          Json? // latest AI goal plan snapshot (what the plan dialog renders); history not kept
+  planUpdatedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([userId])
   @@map("savings_goals")
@@ -216,20 +217,20 @@ enum BillFrequency {
 }
 
 model BillSubscription {
-  id                String            @id @default(cuid())
-  userId            String
-  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name              String
-  amountCents       BigInt
-  frequency         BillFrequency     @default(MONTHLY)
-  nextDueDate       String            // YYYY-MM-DD
-  category          String
-  isAutoPay         Boolean           @default(false)
-  accountId         String?
-  account           FinancialAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  status            String            @default("active")
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  id          String            @id @default(cuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  amountCents BigInt
+  frequency   BillFrequency     @default(MONTHLY)
+  nextDueDate String // YYYY-MM-DD
+  category    String
+  isAutoPay   Boolean           @default(false)
+  accountId   String?
+  account     FinancialAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  status      String            @default("active")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@index([userId])
   @@map("bill_subscriptions")
@@ -240,17 +241,17 @@ model BillSubscription {
 // -----------------------------------------------------------------------------
 
 model DebtAccount {
-  id                  String    @id @default(cuid())
+  id                  String   @id @default(cuid())
   userId              String
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name                String
   balanceCents        BigInt
-  aprPercent          Float     // e.g. 24.99
+  aprPercent          Float // e.g. 24.99
   minimumPaymentCents BigInt
-  dueDateDay          Int       // 1 - 31
-  category            String    // credit_card, student_loan, mortgage, personal_loan
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  dueDateDay          Int // 1 - 31
+  category            String // credit_card, student_loan, mortgage, personal_loan
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([userId])
   @@map("debt_accounts")
@@ -261,17 +262,17 @@ model DebtAccount {
 // -----------------------------------------------------------------------------
 
 model AuditEvent {
-  id              String    @id @default(cuid())
-  userId          String?
-  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  eventType       String    // "TRANSACTION_CREATE", "LEDGER_RECONCILE", etc.
-  actor           String    // "USER", "SYSTEM", "COPILOT"
-  details         String    // Redacted event summary
-  ipAddress       String?
-  userAgent       String?
-  checksumBefore  String?   // SOX cryptographic hash prior to mutation
-  checksumAfter   String    // SOX cryptographic hash after mutation
-  createdAt       DateTime  @default(now())
+  id             String   @id @default(cuid())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType      String // "TRANSACTION_CREATE", "LEDGER_RECONCILE", etc.
+  actor          String // "USER", "SYSTEM", "COPILOT"
+  details        String // Redacted event summary
+  ipAddress      String?
+  userAgent      String?
+  checksumBefore String? // SOX cryptographic hash prior to mutation
+  checksumAfter  String // SOX cryptographic hash after mutation
+  createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
   @@map("audit_events")
@@ -282,13 +283,13 @@ model AuditEvent {
 // -----------------------------------------------------------------------------
 
 model CopilotMessage {
-  id              String    @id @default(cuid())
-  userId          String
-  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role            String    // "user", "assistant", "system"
-  content         String
-  evidenceScope   String?   // Audited tool call evidence reference
-  createdAt       DateTime  @default(now())
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          String // "user", "assistant", "system"
+  content       String
+  evidenceScope String? // Audited tool call evidence reference
+  createdAt     DateTime @default(now())
 
   @@index([userId, createdAt])
   @@map("copilot_messages")
@@ -335,10 +336,40 @@ model RateLimitBucket {
 model MerchantRule {
   userId             String
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  normalizedMerchant String   // lower-cased keyword matched with "contains"
+  normalizedMerchant String // lower-cased keyword matched with "contains"
   category           String
   updatedAt          DateTime @updatedAt
 
   @@id([userId, normalizedMerchant])
   @@map("merchant_rules")
+}
+
+// -----------------------------------------------------------------------------
+// FX RATES (one row per UTC day; not user data)
+// -----------------------------------------------------------------------------
+
+model FxSnapshot {
+  day       String   @id // YYYY-MM-DD (UTC)
+  base      String // rates are units of each currency per 1 `base`
+  rates     Json // { "BDT": "122150000000", ... } scaled by FX_SCALE (1e9) as integer strings
+  source    String
+  fetchedAt DateTime @default(now())
+
+  @@map("fx_snapshots")
+}
+
+// -----------------------------------------------------------------------------
+// PER-PAGE AI INSIGHT CACHE (latest per user + page; saves AI quota on tab switches)
+// -----------------------------------------------------------------------------
+
+model PageInsight {
+  userId    String
+  segment   String
+  payload   Json // CopilotAnswer: facts are server-computed, text is template or grounded narration
+  dataHash  String // changes when the user's data changes, which invalidates the cache
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, segment])
+  @@map("page_insights")
 }

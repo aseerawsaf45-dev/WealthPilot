@@ -151,3 +151,42 @@ export async function userToday(userId: string): Promise<string> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { timezone: true } });
   return todayIn(user?.timezone ?? 'UTC');
 }
+
+/**
+ * GDPR Art. 20 portability: every row the user owns, straight from the DB (not the client's
+ * newest-2,000 view). No password hash, session ids or AI consent internals.
+ */
+export async function exportUserData(userId: string) {
+  const { listAccounts } = await import('./ledger');
+  const [profile, accounts, txs, budgets, goals, bills, debts, audit] = await Promise.all([
+    getProfile(userId),
+    listAccounts(userId),
+    prisma.transaction.findMany({ where: { userId, status: { not: 'VOID' } }, include: { splits: true }, orderBy: [{ financialDate: 'asc' }, { id: 'asc' }] }),
+    prisma.budgetCategory.findMany({ where: { userId }, orderBy: [{ monthYear: 'asc' }, { category: 'asc' }] }),
+    prisma.savingsGoal.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
+    prisma.billSubscription.findMany({ where: { userId }, orderBy: { nextDueDate: 'asc' } }),
+    prisma.debtAccount.findMany({ where: { userId } }),
+    prisma.auditEvent.findMany({ where: { userId }, orderBy: { createdAt: 'asc' }, take: 5000 }),
+  ]);
+  const { toClientTransaction, toClientGoal, toClientBill, toClientDebt, toClientBudget } = await import('../mappers');
+  const today = todayIn(profile.timezone);
+  await prisma.$transaction((tx) => writeAudit(tx, userId, 'DATA_EXPORTED', `transactions=${txs.length}`));
+  return {
+    exportedAt: new Date().toISOString(),
+    schemaVersion: '2.0.0',
+    note: 'Money values are integer minor units of each row’s currency (e.g. cents; JPY has none).',
+    profile: profile.preferences,
+    accounts,
+    transactions: txs.map(toClientTransaction),
+    budgets: budgets.map((b) => ({ ...toClientBudget(b, 0), monthYear: b.monthYear })),
+    goals: goals.map(toClientGoal),
+    bills: bills.map((b) => toClientBill(b, today)),
+    debts: debts.map(toClientDebt),
+    auditLog: audit.map(toClientAudit),
+  };
+}
+
+/** Audit for AI document reading: counts only, never content. */
+export async function recordDocumentExtraction(userId: string, rows: number, dropped: number) {
+  await prisma.$transaction((tx) => writeAudit(tx, userId, 'DOC_EXTRACTED', `rows=${rows} dropped=${dropped}`));
+}

@@ -18,6 +18,11 @@ import { SettingsTab } from '../components/SettingsTab';
 import { LandingPage } from '../components/LandingPage';
 import { AuthModal } from '../components/AuthModal';
 import { dollarsToCents } from '../lib/money';
+import { useToday } from '../lib/dates';
+import { onUi } from '../lib/uiBus';
+import { segmentForTab } from '../lib/assistant';
+import { MotionConfig } from 'motion/react';
+import { TabTransition } from '../components/motion/TabTransition';
 import {
   Compass,
   ShieldCheck,
@@ -37,6 +42,7 @@ function WealthPilotApp() {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [assistantPrefill, setAssistantPrefill] = useState<{ text: string; nonce: number } | undefined>();
 
   const { accounts, addTransaction, preferences, isReady, syncError, clearSyncError } = useFinance();
 
@@ -44,6 +50,19 @@ function WealthPilotApp() {
   useEffect(() => {
     document.documentElement.dataset.reducedMotion = String(!!preferences.reducedMotion);
   }, [preferences.reducedMotion]);
+
+  // Cross-page intents from insights: open a tab, or open the assistant about a page.
+  useEffect(
+    () =>
+      onUi((e) => {
+        if (e.type === 'navigate' && TABS.includes(e.tab)) setActiveTab(e.tab);
+        if (e.type === 'ask-assistant') {
+          setAssistantPrefill({ text: e.question || (e.scope ? `/${e.scope}` : ''), nonce: Date.now() });
+          setIsAssistantOpen(true);
+        }
+      }),
+    []
+  );
 
   // Error toasts dismiss themselves after 6 s (still dismissible by hand).
   useEffect(() => {
@@ -69,12 +88,14 @@ function WealthPilotApp() {
   useEffect(() => {
     const syncFromHash = () => {
       if (typeof window !== 'undefined') {
-        const [view, tab] = window.location.hash.slice(1).split('/');
-        if (view === 'app') {
+        const hash = window.location.hash;
+        if (hash.startsWith('#app')) {
+          const [view, tab] = hash.slice(1).split('/');
           setViewMode('app');
           if (tab && TABS.includes(tab)) setActiveTab(tab);
-        } else if (window.location.hash === '#landing') {
+        } else if (hash === '#landing' || !hash || hash === '#') {
           setViewMode('landing');
+          setActiveTab('overview');
         }
       }
     };
@@ -96,6 +117,9 @@ function WealthPilotApp() {
 
   const handleSetViewMode = (mode: 'landing' | 'app') => {
     setViewMode(mode);
+    if (mode === 'landing') {
+      setActiveTab('overview');
+    }
     if (typeof window !== 'undefined') {
       window.location.hash = mode === 'landing' ? '#landing' : '#app';
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -103,7 +127,8 @@ function WealthPilotApp() {
   };
 
   // Quick Add Form
-  const [qDate, setQDate] = useState('2026-10-16');
+  const today = useToday();
+  const [qDate, setQDate] = useState('');
   const [qMerchant, setQMerchant] = useState('');
   const [qAmount, setQAmount] = useState('');
   const [qType, setQType] = useState<'expense' | 'income'>('expense');
@@ -115,17 +140,18 @@ function WealthPilotApp() {
     e.preventDefault();
     if (!qMerchant.trim() || !qAmount.trim()) return;
 
-    const baseCents = dollarsToCents(qAmount);
+    const account = accounts.find((a) => a.id === qAccount) ?? accounts[0];
+    const baseCents = dollarsToCents(qAmount, account?.currency);
     const amountCents = qType === 'expense' ? -Math.abs(baseCents) : Math.abs(baseCents);
 
     addTransaction({
-      accountId: qAccount || accounts[0]?.id || 'acc_checking',
-      financialDate: qDate,
+      accountId: account?.id || 'acc_checking',
+      financialDate: qDate || today,
       merchant: qMerchant.trim(),
       normalizedMerchant: qMerchant.trim(),
       category: qCategory.trim() || 'General',
       amountCents,
-      currency: 'USD',
+      currency: account?.currency || preferences.baseCurrency || 'USD',
       status: 'cleared',
       notes: qNotes.trim() || undefined,
       tags: [],
@@ -188,7 +214,9 @@ function WealthPilotApp() {
   }
 
   return (
+    <MotionConfig reducedMotion={preferences.reducedMotion ? 'always' : 'user'}>
     <div className="min-h-screen flex flex-col bg-[#F4F6F9] text-[#0F172A] selection:bg-sky-500/20 selection:text-sky-900 relative overflow-x-hidden font-sans">
+      <div className="wp-aurora" aria-hidden />
       {/* Subtle Top Ambient Horizon */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[1400px] h-[340px] bg-gradient-to-b from-sky-400/[0.07] via-sky-300/[0.02] to-transparent blur-[120px] pointer-events-none -z-10" />
 
@@ -240,8 +268,8 @@ function WealthPilotApp() {
             <div className="wp-skeleton h-72" />
           </div>
         ) : (
-          // Keyed by tab so each tab switch replays the entrance animation.
-          <div key={activeTab} className="wp-enter">
+          // Directional slide between tabs (motion); reduced motion turns it into an instant swap.
+          <TabTransition tabKey={activeTab} index={Math.max(0, TABS.indexOf(activeTab))}>
             {activeTab === 'overview' && (
               <OverviewTab
                 setActiveTab={setActiveTab}
@@ -258,7 +286,7 @@ function WealthPilotApp() {
             {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} onOpenQuickAdd={() => setIsQuickAddOpen(true)} />}
             {activeTab === 'import' && <ImportTab />}
             {activeTab === 'settings' && <SettingsTab />}
-          </div>
+          </TabTransition>
         )}
       </main>
 
@@ -295,7 +323,7 @@ function WealthPilotApp() {
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">Date</label>
                   <input
                     type="date"
-                    value={qDate}
+                    value={qDate || today}
                     onChange={(e) => setQDate(e.target.value)}
                     required
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -432,6 +460,8 @@ function WealthPilotApp() {
             setIsAssistantOpen(false);
             setActiveTab('copilot');
           }}
+          pageScope={segmentForTab(activeTab)}
+          prefill={assistantPrefill}
         />
       )}
 
@@ -443,6 +473,7 @@ function WealthPilotApp() {
         onSuccess={() => setViewMode('app')}
       />
     </div>
+    </MotionConfig>
   );
 }
 

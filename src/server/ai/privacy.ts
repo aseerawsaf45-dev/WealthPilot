@@ -41,6 +41,14 @@ export function canUseLlm(user: AiConsentState, provider: Provider): boolean {
   return consented && (provider !== 'gemini' || allowGemini(user));
 }
 
+/**
+ * Document reading (receipt/statement text → rows) is a separate opt-in on top of Groq consent.
+ * Only Groq is used for it: document text may contain names and merchants, so the Gemini free tier never gets it.
+ */
+export function canReadDocuments(user: AiConsentState): boolean {
+  return canUseLlm(user, 'groq') && user.aiProviders.includes('documents');
+}
+
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE = /\+?\d[\d\s().-]{7,}\d/g;
 
@@ -49,4 +57,11 @@ export function redactForLlm(text: string): string {
   const npi = scanAndRedactNpi(text).sanitizedText;
   const pci = scanAndEnforcePciDssScope(npi).sanitizedText;
   return pci.replace(EMAIL, '[REDACTED_EMAIL]').replace(PHONE, '[REDACTED_PHONE]');
+}
+
+const LONG_NUMBER = /\b(?:\d[ -]?){9,}\b/g; // account / reference / card-like numbers (amounts are shorter)
+
+/** Document text: redactForLlm, plus any long digit run (account and reference numbers). */
+export function redactDocumentText(text: string): string {
+  return redactForLlm(text).replace(LONG_NUMBER, '[REDACTED_NUMBER]');
 }

@@ -6,7 +6,10 @@ import { executeCopilotQuery } from '../services/copilotService';
 import { api } from '../lib/api';
 import { formatFact } from '../lib/money';
 import { AiConsentDialog } from './AiConsentDialog';
-import { looksLikeCommand, parseScope, SEGMENTS } from '../lib/assistant';
+import { useDocumentImport } from './import/useDocumentImport';
+import { DocumentDropzone, ImportReview, DocumentReadingConsent } from './import/ImportReview';
+import { ACCEPT } from '../lib/extract/browser';
+import { looksLikeCommand, parseScope, SEGMENTS, type SegmentId } from '../lib/assistant';
 import type { ChatSummary } from '../context/useChatHistory';
 import { ASSISTANT_OPS, type ActionProposal, type CopilotFact, type CopilotMessage } from '../types/finance';
 import {
@@ -27,6 +30,8 @@ import {
   ReceiptText,
   Target,
   Wallet,
+  Paperclip,
+  X as CloseIcon,
 } from 'lucide-react';
 
 interface ServerAnswer {
@@ -86,9 +91,13 @@ interface CopilotTabProps {
   compact?: boolean;
   onClose?: () => void;
   onExpand?: () => void;
+  /** The page the floating assistant was opened from: questions without "/segment" are answered for it. */
+  pageScope?: SegmentId;
+  /** Sent once when `nonce` changes (e.g. "Ask about this page" → "/goals"). */
+  prefill?: { text: string; nonce: number };
 }
 
-export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClose, onExpand }: CopilotTabProps) {
+export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClose, onExpand, pageScope, prefill }: CopilotTabProps) {
   const finance = useFinance();
   const {
     accounts,
@@ -116,6 +125,19 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
   const [menuIndex, setMenuIndex] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(!compact);
   const [now] = useState(() => Date.now());
+  const [usePageScope, setUsePageScope] = useState(true);
+  // Attachments: receipts, statements, spreadsheets → read on this device → reviewed in a sheet → saved.
+  const docs = useDocumentImport();
+  const [importOpen, setImportOpen] = useState(false);
+  const [docConsentOpen, setDocConsentOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attach = (files: FileList | File[]) => {
+    if (!Array.from(files).length) return;
+    setImportOpen(true);
+    void docs.addFiles(files);
+  };
+  const pageLabel = pageScope ? SEGMENTS.find((x) => x.id === pageScope)?.label : undefined;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const threadEnd = useRef<HTMLDivElement>(null);
   const createdIds = useRef(new Map<string, string>()); // message id -> id of the record its plan created (for '$prev' steps)
@@ -146,7 +168,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
   // Signed in, the server answers with calculations even when AI wording is off.
   const canAsk = isSignedIn || preferences.isAiEnabled;
   const conversation = copilotHistory.filter((m) => m.id !== 'init_welcome'); // the demo greeting is replaced by the empty state
-  const isEmpty = !conversation.some((m) => m.sender === 'user');
+  const isEmpty = conversation.length === 0; // an assistant-only message (e.g. an import result) also ends the empty state
   const activeTitle = chats.find((c) => c.id === activeChatId)?.title ?? 'New chat';
 
   const reply = (content: string) => addCopilotMessage({ id: messageId('copilot'), sender: 'assistant', timestamp: new Date().toISOString(), content });
@@ -154,7 +176,9 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
   const handleSend = async (queryToSend?: string) => {
     const text = (queryToSend ?? inputQuery).trim();
     if (!text || isProcessing || !canAsk) return;
-    const { scope, text: question } = parseScope(text);
+    const parsed = parseScope(text);
+    const question = parsed.text;
+    const scope = parsed.scope ?? (usePageScope ? pageScope : undefined);
     // Recent turns let a follow-up ("maybe $30") finish the earlier request.
     const history = copilotHistory
       .filter((m) => m.content && m.id !== 'init_welcome')
@@ -203,6 +227,19 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
       setIsProcessing(false);
     }, 400);
   };
+
+  // "Ask about this page" (and other prefills) send once per nonce.
+  const sentNonce = useRef<number | null>(null);
+  const sendRef = useRef(handleSend);
+  useEffect(() => {
+    sendRef.current = handleSend;
+  });
+  useEffect(() => {
+    if (!prefill || sentNonce.current === prefill.nonce) return;
+    sentNonce.current = prefill.nonce;
+    if (prefill.text) sendRef.current(prefill.text);
+    else inputRef.current?.focus();
+  }, [prefill]);
 
   /**
    * Runs one proposal through the same FinanceContext action the app's own buttons use. '$prev' in its args is
@@ -513,12 +550,32 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
 
   return (
     <div
-      className={
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDragOver(false);
+        attach(e.dataTransfer.files);
+      }}
+      className={`${
         compact
           ? 'relative flex h-full min-h-0 overflow-hidden'
           : 'relative flex h-[calc(100dvh-12rem)] min-h-[560px] overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm'
-      }
+      } ${dragOver ? 'wp-dropzone-active' : ''}`}
     >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-sky-50/80 backdrop-blur-[2px]">
+          <p className="wp-pop rounded-2xl border border-sky-300 bg-white px-5 py-3 text-sm font-bold text-sky-800 shadow-lg">Drop to read receipts, statements or spreadsheets</p>
+        </div>
+      )}
       {sidebar}
       {sidebarOpen && compact && <div className="absolute inset-0 z-10 bg-slate-900/10" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 
@@ -657,7 +714,33 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
                 ))}
               </ul>
             )}
+            {pageLabel && (
+              <div className="mb-2 flex items-center gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setUsePageScope((v) => !v)}
+                  aria-pressed={usePageScope}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-semibold transition-colors cursor-pointer ${
+                    usePageScope ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-slate-200 bg-white text-slate-500'
+                  }`}
+                  title={usePageScope ? 'Answers focus on this page. Click to ask about anything.' : 'Click to focus answers on this page'}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${usePageScope ? 'bg-sky-500' : 'bg-slate-300'}`} />
+                  {usePageScope ? `Focused on ${pageLabel}` : 'Any topic'}
+                </button>
+              </div>
+            )}
             <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 shadow-2xs focus-within:border-sky-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-sky-500/10">
+              <input ref={fileInput} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => e.target.files && (attach(e.target.files), (e.target.value = ''))} />
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                aria-label="Attach receipts, statements or spreadsheets"
+                title="Attach a receipt photo, PDF statement, CSV or Excel file"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-white hover:text-sky-700 cursor-pointer"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -666,6 +749,13 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
                 onChange={(e) => {
                   setInputQuery(e.target.value);
                   setMenuIndex(0);
+                }}
+                onPaste={(e) => {
+                  const files = Array.from(e.clipboardData.files);
+                  if (files.length) {
+                    e.preventDefault();
+                    attach(files);
+                  }
                 }}
                 onKeyDown={(e) => {
                   if (segmentOptions.length) {
@@ -709,12 +799,42 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
               </button>
             </div>
             <p className="mt-1.5 text-center text-[10px] text-slate-400">
-              Enter to send · Shift+Enter for a new line · Not financial advice; numbers are calculated from your ledger.
+              Enter to send · Shift+Enter for a new line · Attach or drop receipts and statements to import them · Numbers are calculated from your ledger.
             </p>
           </div>
         </form>
       </section>
 
+      {importOpen && (
+        <div className="absolute inset-0 z-40 flex flex-col bg-white/95 backdrop-blur-sm wp-enter" role="dialog" aria-modal="true" aria-label="Import from files">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div>
+              <p className="text-sm font-extrabold text-[#0F172A]">Add transactions from files</p>
+              <p className="text-[11px] font-medium text-slate-500">Read on your device · check and edit, then save</p>
+            </div>
+            <button type="button" onClick={() => setImportOpen(false)} aria-label="Close import" className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 cursor-pointer">
+              <CloseIcon className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
+            <DocumentDropzone imp={docs} compact />
+            <ImportReview
+              imp={docs}
+              onAskConsent={() => setDocConsentOpen(true)}
+              onSaved={(n) => {
+                addCopilotMessage({
+                  id: messageId('copilot'),
+                  sender: 'assistant',
+                  timestamp: new Date().toISOString(),
+                  content: `Saved ${n} transaction${n === 1 ? '' : 's'} from your files. You can undo it from the import sheet, or edit them in Transactions.`,
+                  suggestedActions: [{ label: 'Open transactions', action: 'open_transactions' }],
+                });
+              }}
+            />
+          </div>
+        </div>
+      )}
+      <DocumentReadingConsent open={docConsentOpen} onClose={() => setDocConsentOpen(false)} />
       <AiConsentDialog isOpen={consentOpen} onClose={() => setConsentOpen(false)} />
     </div>
   );

@@ -356,3 +356,37 @@ export async function saveGoalPlan(userId: string, id: string, plan: GoalPlanSna
     return toClientGoal(row);
   });
 }
+
+/**
+ * Applies one "way to make it reachable" from the goal's SAVED plan, all-or-nothing.
+ * The action is read from the stored snapshot (never from the client), budgets keep their
+ * alert threshold and rollover, and paused goals must belong to the same user.
+ */
+export async function applyGoalPlanOption(userId: string, goalId: string, optionId: string, month: string, today: string) {
+  const goal = await prisma.savingsGoal.findFirst({ where: { id: goalId, userId } });
+  if (!goal) throw notFound('Goal');
+  const plan = goal.plan as unknown as GoalPlanSnapshot | null;
+  const option = plan?.contingencies?.find((c) => c.id === optionId);
+  if (!option || option.action.kind === 'none') throw new HttpError('VALIDATION_ERROR', 'That option is not in the saved plan. Recalculate the plan first.', 400);
+  const a = option.action;
+  if ((a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts') && a.date <= today) throw new HttpError('VALIDATION_ERROR', 'That deadline has passed. Recalculate the plan.', 400);
+
+  await prisma.$transaction(async (tx) => {
+    if (a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts') await tx.savingsGoal.update({ where: { id: goalId }, data: { targetDate: a.date } });
+    if (a.kind === 'set_target') await tx.savingsGoal.update({ where: { id: goalId }, data: { targetCents: BigInt(a.cents) } });
+    if (a.kind === 'budget_cuts' || a.kind === 'deadline_and_cuts') {
+      for (const cut of a.cuts) {
+        await tx.budgetCategory.upsert({
+          where: { userId_category_monthYear: { userId, category: cut.category, monthYear: month } },
+          create: { userId, category: cut.category, monthYear: month, allocatedCents: BigInt(cut.allocatedCents) },
+          update: { allocatedCents: BigInt(cut.allocatedCents) }, // threshold and rollover stay as the user set them
+        });
+      }
+    }
+    if (a.kind === 'pause_goals') await tx.savingsGoal.updateMany({ where: { id: { in: a.goalIds }, userId }, data: { isPaused: true } });
+    await writeAudit(tx, userId, 'GOAL_PLAN_APPLIED', `goal=${goalId} option=${optionId}`);
+  });
+
+  const [goals, budgets] = await Promise.all([listGoals(userId), listBudgets(userId, month)]);
+  return { goals, budgets };
+}

@@ -48,8 +48,10 @@ export function calculateDebtPayoffSchedule(
 
   let currentMonth = 0;
   const maxSimulationMonths = 360; // 30-year safety ceiling
+  const balanceByMonth = [activeDebts.reduce((s, d) => s + Math.max(0, d.balanceCents), 0)];
 
   while (activeDebts.some((d) => !d.isPaidOff) && currentMonth < maxSimulationMonths) {
+    if (currentMonth > 0) balanceByMonth.push(activeDebts.reduce((s, d) => s + Math.max(0, d.balanceCents), 0));
     currentMonth++;
     let freedUpFromPreviousDebts = 0;
 
@@ -103,6 +105,7 @@ export function calculateDebtPayoffSchedule(
     totalMonths: currentMonth,
     totalInterestPaidCents,
     monthlyExtraPaymentCents,
+    balanceByMonth: [...balanceByMonth, activeDebts.reduce((s, d) => s + Math.max(0, d.balanceCents), 0)],
     debtOrder: activeDebts.map((d) => ({
       id: d.id,
       name: d.name,

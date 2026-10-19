@@ -297,3 +297,22 @@ export async function rollbackImport(userId: string, batchId: string) {
   });
   return { voidedIds: ids, accounts: await listAccounts(userId) };
 }
+
+/**
+ * ML-01: applies confirmed category suggestions in one go (one DB transaction, one audit entry).
+ * Ids that aren't the user's live transactions are skipped, never revealed.
+ */
+export async function recategorizeTransactions(userId: string, items: Array<{ id: string; category: string }>) {
+  const ids = [...new Set(items.map((i) => i.id))];
+  const owned = await prisma.transaction.findMany({ where: { id: { in: ids }, userId, status: LIVE }, select: { id: true } });
+  const ok = new Set(owned.map((o) => o.id));
+  const todo = items.filter((i) => ok.has(i.id));
+  if (!todo.length) return [];
+  const rows = await prisma.$transaction(async (tx) => {
+    const out = [];
+    for (const it of todo) out.push(await tx.transaction.update({ where: { id: it.id }, data: { category: it.category }, include: { splits: true } }));
+    await writeAudit(tx, userId, 'TRANSACTIONS_RECATEGORIZED', `count=${todo.length} source=suggestions`);
+    return out;
+  });
+  return rows.map(toClientTransaction);
+}

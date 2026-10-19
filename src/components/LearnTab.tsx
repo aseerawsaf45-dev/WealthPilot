@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useInsights } from '../context/useInsights';
+import { todayYmd } from '../lib/dates';
+import { PageInsights } from './PageInsights';
+import { formatMoney, toMinor, fromMinor } from '../lib/money';
 import { useFinance } from '../context/FinanceContext';
 import {
   GraduationCap,
@@ -85,7 +89,7 @@ const LEARNING_MODULES: LearningModule[] = [
       {
         id: 'q_runway_2',
         question: 'Where should your Tier-1 emergency fund be parked for optimal balance of safety and growth?',
-        scenario: 'You have accumulated $15,000 / ৳150,000 for your emergency fund and want to preserve capital.',
+        scenario: 'You have saved six months of expenses for your emergency fund and want to keep it safe and available.',
         options: [
           'In high-volatility speculative crypto tokens',
           'In a High-Yield Savings Account (HYSA) or liquid capital account with near-zero principal risk',
@@ -173,7 +177,7 @@ const LEARNING_MODULES: LearningModule[] = [
           '18.0 years',
         ],
         correctAnswerIndex: 1,
-        explanation: 'Perfect! 72 divided by 9 equals 8 years. A $10,000 / ৳100,000 investment becomes $20,000 in 8 years, and $40,000 in 16 years.',
+        explanation: 'Perfect! 72 divided by 9 equals 8 years. Money invested at 9% doubles in about 8 years, and doubles again (4×) by year 16.',
       },
       {
         id: 'q_rule72_2',
@@ -238,6 +242,18 @@ const LEARNING_MODULES: LearningModule[] = [
   },
 ];
 
+const yesterdayOf = (ymd: string) => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+/** A stored streak only counts if the last lesson was today or yesterday. */
+const liveStreak = (streak: number, lastActive?: string) => {
+  if (!lastActive) return 0;
+  const today = todayYmd();
+  return lastActive === today || lastActive === yesterdayOf(today) ? streak : 0;
+};
+
 const STORAGE_KEY_LEARN_XP = 'wealthpilot_learn_xp_v1';
 const STORAGE_KEY_LEARN_STREAK = 'wealthpilot_learn_streak_v1';
 const STORAGE_KEY_LEARN_COMPLETED = 'wealthpilot_learn_completed_v1';
@@ -246,9 +262,11 @@ const STORAGE_KEY_LEARN_LAST_ACTIVE = 'wealthpilot_learn_last_active_v1';
 export function LearnTab() {
   const { preferences, setPreferences } = useFinance();
   const isSignedIn = preferences.isAuthenticated === true;
-  const [xp, setXp] = useState(320);
-  const [streak, setStreak] = useState(4);
-  const [completedModules, setCompletedModules] = useState<string[]>(['mod_runway']);
+  const [xp, setXp] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [completedModules, setCompletedModules] = useState<string[]>([]);
+  const [lastActive, setLastActive] = useState<string | undefined>();
+  const report = useInsights();
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [selectedModule, setSelectedModule] = useState<LearningModule>(LEARNING_MODULES[0]);
 
@@ -261,7 +279,11 @@ export function LearnTab() {
   const [xpToast, setXpToast] = useState<{ amount: number; message: string } | null>(null);
 
   // Interactive Calculators state
-  const [calcBurn, setCalcBurn] = useState(2500); // for emergency runway calculator
+  // Emergency runway sizer (major units of the base currency): starts at the user's real average spending.
+  const avgSpendMajor = report.averages.expenseCents ? Math.round(Number(fromMinor(report.averages.expenseCents))) : 0;
+  const [burnOverride, setCalcBurn] = useState<number | null>(null);
+  const calcBurn = burnOverride ?? (avgSpendMajor || 2500);
+  const burnMax = Math.max(10000, avgSpendMajor * 3);
   const [calcApr, setCalcApr] = useState(8); // for rule of 72 calculator
 
   // Signed in: progress comes from the account (preferences.learn); a new account starts at zero.
@@ -269,8 +291,9 @@ export function LearnTab() {
   useEffect(() => {
     if (isSignedIn) {
       setXp(preferences.learn?.xp ?? 0);
-      setStreak(preferences.learn?.streak ?? 0);
+      setStreak(liveStreak(preferences.learn?.streak ?? 0, preferences.learn?.lastActive));
       setCompletedModules(preferences.learn?.completed ?? []);
+      setLastActive(preferences.learn?.lastActive);
       return;
     }
     try {
@@ -278,31 +301,40 @@ export function LearnTab() {
       const savedStreak = localStorage.getItem(STORAGE_KEY_LEARN_STREAK);
       const savedCompleted = localStorage.getItem(STORAGE_KEY_LEARN_COMPLETED);
 
+      const savedLast = localStorage.getItem(STORAGE_KEY_LEARN_LAST_ACTIVE) ?? undefined;
       if (savedXp) setXp(parseInt(savedXp, 10));
-      if (savedStreak) setStreak(parseInt(savedStreak, 10));
+      if (savedStreak) setStreak(liveStreak(parseInt(savedStreak, 10), savedLast));
+      setLastActive(savedLast);
       if (savedCompleted) setCompletedModules(JSON.parse(savedCompleted));
     } catch (e) {
       console.warn('Learn storage fallback', e);
     }
   }, [isSignedIn, preferences.learn]);
 
-  const persist = (next: { xp: number; streak: number; completed: string[] }) => {
+  const persist = (next: { xp: number; streak: number; completed: string[]; lastActive?: string }) => {
     if (isSignedIn) {
       setPreferences({ learn: next }); // debounced PATCH /user/preferences
       return;
     }
     try {
       localStorage.setItem(STORAGE_KEY_LEARN_XP, next.xp.toString());
+      localStorage.setItem(STORAGE_KEY_LEARN_STREAK, next.streak.toString());
       localStorage.setItem(STORAGE_KEY_LEARN_COMPLETED, JSON.stringify(next.completed));
+      if (next.lastActive) localStorage.setItem(STORAGE_KEY_LEARN_LAST_ACTIVE, next.lastActive);
     } catch {}
   };
 
   // Save state
   const addXp = (amount: number, reason: string, completed: string[] = completedModules) => {
     const newXp = xp + amount;
+    // Streak: learning on consecutive days adds one; a missed day starts again at one.
+    const today = todayYmd();
+    const nextStreak = lastActive === today ? Math.max(1, streak) : lastActive === yesterdayOf(today) ? streak + 1 : 1;
     setXp(newXp);
+    setStreak(nextStreak);
+    setLastActive(today);
     setXpToast({ amount, message: reason });
-    persist({ xp: newXp, streak, completed });
+    persist({ xp: newXp, streak: nextStreak, completed, lastActive: today });
 
     setTimeout(() => {
       setXpToast(null);
@@ -394,8 +426,35 @@ export function LearnTab() {
     handleResetQuiz();
   };
 
+  // Recommended next lesson from the user's own numbers (first unfinished one that fits).
+  const recommendations: Array<{ id: string; reason: string }> = [];
+  if (report.runwayMonths !== null && report.runwayMonths < 3) recommendations.push({ id: 'mod_runway', reason: `Your cash covers ${report.runwayMonths} months of spending; 3–6 is the usual safety target.` });
+  if (report.insights.some((i) => i.id === 'debt-costly')) recommendations.push({ id: 'mod_debt', reason: 'You have a high-interest debt; choosing the right payoff order saves the most.' });
+  if (report.pace.overBudget.length || report.pace.allocatedCents === 0) recommendations.push({ id: 'mod_budget503020', reason: report.pace.allocatedCents === 0 ? "You haven't set budgets yet; 50/30/20 is a simple starting split." : 'Some budgets are over this month.' });
+  recommendations.push({ id: 'mod_rule72', reason: 'See how saving a little more each month compounds over the years.' }, { id: 'mod_runway', reason: 'The foundation of every plan: a cash cushion.' });
+  const recommended = recommendations.find((r) => !completedModules.includes(r.id));
+  const recommendedModule = recommended && LEARNING_MODULES.find((m) => m.id === recommended.id);
+
   return (
     <div className="space-y-8 pb-24 max-w-7xl mx-auto">
+      <PageInsights segment="learn" />
+
+      {recommendedModule && (
+        <button
+          type="button"
+          onClick={() => handleSwitchModule(recommendedModule)}
+          className="keel-card wp-lift w-full text-left p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-sky-200/80 bg-gradient-to-r from-sky-50/80 via-white to-indigo-50/60 cursor-pointer"
+        >
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700">Recommended for you</span>
+            <h2 className="text-lg font-extrabold text-[#0F172A] tracking-tight mt-0.5">{recommendedModule.title}</h2>
+            <p className="text-xs text-slate-600 font-medium mt-1">{recommended!.reason}</p>
+          </div>
+          <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-[#0F172A] px-4 py-2 text-xs font-bold text-white">
+            Start · +{recommendedModule.xpReward} XP
+          </span>
+        </button>
+      )}
       {/* XP Toast Notification */}
       {xpToast && (
         <div className="fixed top-24 right-6 z-50 animate-in slide-in-from-top-4 duration-300">
@@ -682,7 +741,7 @@ export function LearnTab() {
                     </span>
                   </div>
                   <span className="text-xs font-bold font-money text-sky-900 bg-white px-2.5 py-1 rounded-full border border-sky-200">
-                    ৳ / $ {calcBurn.toLocaleString()}/mo burn
+                    {formatMoney(toMinor(calcBurn))}/mo spending
                   </span>
                 </div>
 
@@ -692,9 +751,9 @@ export function LearnTab() {
                   </label>
                   <input
                     type="range"
-                    min="500"
-                    max="10000"
-                    step="250"
+                    min="0"
+                    max={burnMax}
+                    step={Math.max(1, Math.round(burnMax / 80))}
                     value={calcBurn}
                     onChange={(e) => setCalcBurn(parseInt(e.target.value, 10))}
                     className="w-full accent-sky-600 cursor-pointer"
@@ -707,7 +766,7 @@ export function LearnTab() {
                       3-Month Minimum
                     </span>
                     <span className="text-sm sm:text-base font-extrabold text-slate-900 font-money block mt-0.5">
-                      {(calcBurn * 3).toLocaleString()}
+                      {formatMoney(toMinor(calcBurn) * 3)}
                     </span>
                   </div>
                   <div className="p-3 bg-sky-600 text-white rounded-xl shadow-xs text-center">
@@ -715,7 +774,7 @@ export function LearnTab() {
                       6-Month Recommended
                     </span>
                     <span className="text-sm sm:text-base font-extrabold font-money block mt-0.5">
-                      {(calcBurn * 6).toLocaleString()}
+                      {formatMoney(toMinor(calcBurn) * 6)}
                     </span>
                   </div>
                   <div className="p-3 bg-white rounded-xl border border-sky-100 text-center">
@@ -723,7 +782,7 @@ export function LearnTab() {
                       12-Month Sovereign
                     </span>
                     <span className="text-sm sm:text-base font-extrabold text-slate-900 font-money block mt-0.5">
-                      {(calcBurn * 12).toLocaleString()}
+                      {formatMoney(toMinor(calcBurn) * 12)}
                     </span>
                   </div>
                 </div>

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { CopilotTab } from './CopilotTab';
+import type { SegmentId } from '../lib/assistant';
 
 interface AssistantPanelProps {
   open: boolean;
@@ -11,10 +12,13 @@ interface AssistantPanelProps {
   onOpenQuickAdd: () => void;
   /** Opens the same chat as the full Copilot page. */
   onExpand: () => void;
+  /** The tab it was opened from; questions are focused on it by default. */
+  pageScope?: SegmentId;
+  prefill?: { text: string; nonce: number };
 }
 
 /** Floating WealthPilot Assistant: the copilot chat, available on every tab. Changes still need Confirm. */
-export function AssistantPanel({ open, onOpenChange, onNavigate, onOpenQuickAdd, onExpand }: AssistantPanelProps) {
+export function AssistantPanel({ open, onOpenChange, onNavigate, onOpenQuickAdd, onExpand, pageScope, prefill }: AssistantPanelProps) {
   const panel = useRef<HTMLDivElement>(null);
   const launcher = useRef<HTMLButtonElement>(null);
 
@@ -79,6 +83,8 @@ export function AssistantPanel({ open, onOpenChange, onNavigate, onOpenQuickAdd,
               onOpenQuickAdd={onOpenQuickAdd}
               onClose={() => onOpenChange(false)}
               onExpand={onExpand}
+              pageScope={pageScope}
+              prefill={prefill}
             />
           </div>
         </div>

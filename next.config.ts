@@ -5,7 +5,10 @@ import type { NextConfig } from "next";
 // Dev needs 'unsafe-eval' for React's debugging tools and HMR.
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  // 'wasm-unsafe-eval' lets on-device OCR (tesseract.js) compile WebAssembly; it does not allow JS eval().
+  `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+  // OCR / PDF / HEIC readers run in Web Workers (self-hosted files under /vendor, or blob: workers).
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",

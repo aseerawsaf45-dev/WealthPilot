@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import CurrencySelect from './CurrencySelect';
 import { useFinance } from '../context/FinanceContext';
 import { exportTransactionsToCsv } from '../services/importService';
 import { AiConsentDialog } from './AiConsentDialog';
@@ -58,20 +59,18 @@ export function SettingsTab() {
 
   // Handle Full JSON Export
   const handleExportJson = () => {
+    // Signed in: the server exports every row (not just what this tab has loaded).
+    if (preferences.isAuthenticated) {
+      window.location.href = '/api/v1/user/export';
+      setExportNotice('Preparing your full export from the server…');
+      setTimeout(() => setExportNotice(null), 4000);
+      return;
+    }
     const fullArchive = {
-      exportTimestamp: '2026-10-16T12:00:00.000Z',
-      schemaVersion: '1.0.0',
-      dataIntegrity: 'SHA256_LOCAL_VERIFIED',
-      payload: {
-        accounts,
-        transactions,
-        budgets,
-        goals,
-        bills,
-        debts,
-        preferences,
-        auditLogs,
-      },
+      exportedAt: new Date().toISOString(),
+      schemaVersion: '2.0.0',
+      note: 'Demo data from this browser tab (not saved anywhere).',
+      payload: { accounts, transactions, budgets, goals, bills, debts, preferences },
     };
 
     const blob = new Blob([JSON.stringify(fullArchive, null, 2)], {
@@ -80,17 +79,23 @@ export function SettingsTab() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'wealthpilot_export_archive.json';
+    link.download = 'wealthpilot_demo_export.json';
     link.click();
     URL.revokeObjectURL(url);
 
-    setExportNotice('Full encrypted JSON archive downloaded successfully.');
+    setExportNotice('Demo data exported as JSON.');
     setTimeout(() => setExportNotice(null), 4000);
   };
 
   // Handle Neutralized CSV Export
   const handleExportCsv = () => {
-    exportTransactionsToCsv(transactions);
+    const blob = new Blob([exportTransactionsToCsv(transactions)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `wealthpilot_transactions_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
     setExportNotice('Sanitized CSV exported with spreadsheet formula injection protection.');
     setTimeout(() => setExportNotice(null), 4000);
   };
@@ -241,24 +246,24 @@ export function SettingsTab() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-bold text-[#0F172A]">Sandbox Demo Mode</p>
-                <p className="text-[11px] text-slate-500 font-medium">Use isolated synthetic sample records</p>
-              </div>
-              <button
-                onClick={() => setPreferences({ isDemoMode: !preferences.isDemoMode })}
-                className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
-                  preferences.isDemoMode ? 'bg-sky-500' : 'bg-slate-300'
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 rounded-full bg-white transition-transform absolute top-1 shadow-xs ${
-                    preferences.isDemoMode ? 'right-1' : 'left-1'
-                  }`}
-                />
-              </button>
-            </div>
+            {preferences.isAuthenticated && (() => {
+              const aiEvents = auditLogs.filter((e) => /^(GOAL_PLAN_SAVED|AI_CONSENT_|DOC_EXTRACTED|TRANSACTIONS_RECATEGORIZED|CSV_IMPORTED)/.test(e.action));
+              return (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5">
+                  <p className="text-xs font-bold text-[#0F172A]">What the AI can see</p>
+                  <ul className="mt-1.5 space-y-1 text-[11px] text-slate-600 font-medium list-disc pl-4">
+                    <li>Questions and page summaries: labels like “Spending this month” with placeholders. Amounts are filled in by WealthPilot after the AI answers.</li>
+                    <li>Scanned receipts and statements: only the text read on your device, with card numbers, emails and phone numbers removed, and only if you allow document reading.</li>
+                    <li>Never: passwords, full account numbers, or your transaction history.</li>
+                  </ul>
+                  {aiEvents.length > 0 && (
+                    <p className="mt-2 text-[10px] text-slate-500 font-semibold">
+                      Recent AI-related activity: {aiEvents.slice(0, 3).map((e) => `${e.action.replace(/_/g, ' ').toLowerCase()} (${new Date(e.timestamp).toLocaleDateString()})`).join(' · ')}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -293,21 +298,18 @@ export function SettingsTab() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label htmlFor="base-currency" className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Base Currency
                 </label>
-                <select
+                <CurrencySelect
+                  id="base-currency"
                   value={preferences.baseCurrency}
-                  onChange={(e) => setPreferences({ baseCurrency: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-sky-500"
-                >
-                  <option value="USD">USD ($) — United States Dollar</option>
-                  <option value="EUR">EUR (€) — Euro</option>
-                  <option value="GBP">GBP (£) — British Pound</option>
-                  <option value="CAD">CAD ($) — Canadian Dollar</option>
-                  <option value="AUD">AUD ($) — Australian Dollar</option>
-                  <option value="JPY">JPY (¥) — Japanese Yen</option>
-                </select>
+                  onChange={(code) => setPreferences({ baseCurrency: code })}
+                  ariaLabel="Base currency"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Goals, budgets, bills and debts use this currency. Accounts in other currencies are converted at the daily market rate for totals (shown as estimates).
+                </p>
               </div>
 
               {preferences.isAuthenticated && (

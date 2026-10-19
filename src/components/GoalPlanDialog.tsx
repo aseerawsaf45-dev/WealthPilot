@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, CheckCircle2, AlertTriangle, CalendarDays, RefreshCw, Loader2, Info, Clock, PiggyBank, Scissors, Scale, PauseCircle, Target, TrendingUp, Lightbulb } from 'lucide-react';
+import { useInsights } from '../context/useInsights';
 import { useFinance } from '../context/FinanceContext';
 import { formatFact, formatMoney, dollarsToCents } from '../lib/money';
 import { planStaleReason, daysAgo } from '../lib/goalPlan';
@@ -94,29 +95,32 @@ function describeAction(goal: SavingsGoal, a: ContingencyAction): string {
 
 /** "Ways to make it reachable": server-calculated options, each with an optional one-click Apply. */
 function ContingencyOptions({ goal, options, onDeadlineChange }: { goal: SavingsGoal; options: Contingency[]; onDeadlineChange: (d: string) => void }) {
-  const { updateGoal, addBudget } = useFinance();
+  const { updateGoal, addBudget, budgets, applyGoalPlanOption } = useFinance();
   const [busy, setBusy] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const apply = async (c: Contingency) => {
     const a = c.action;
-    if (a.kind === 'none' || !window.confirm(describeAction(goal, a))) return;
+    if (a.kind === 'none') return;
     setBusy(c.id);
-    const setBudgets = async (cuts: { category: string; allocatedCents: number }[]) => {
-      for (const cut of cuts) {
-        // addBudget upserts by category for the current month.
-        await addBudget({ category: cut.category, allocatedCents: cut.allocatedCents, spentCents: 0, period: 'monthly', rolloverEnabled: false, rolloverCents: 0, alertThresholdPercent: 85 });
+    setConfirming(null);
+    // Signed in: the server applies the saved option atomically. Demo: same steps with local actions.
+    const server = await applyGoalPlanOption(goal.id, c.id);
+    if (server === null) {
+      if (a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts') await updateGoal(goal.id, { targetDate: a.date });
+      if (a.kind === 'set_target') await updateGoal(goal.id, { targetCents: a.cents });
+      if (a.kind === 'budget_cuts' || a.kind === 'deadline_and_cuts') {
+        for (const cut of a.cuts) {
+          const existing = budgets.find((b) => b.category === cut.category);
+          await addBudget({ category: cut.category, allocatedCents: cut.allocatedCents, spentCents: existing?.spentCents ?? 0, period: 'monthly', rolloverEnabled: existing?.rolloverEnabled ?? false, rolloverCents: existing?.rolloverCents ?? 0, alertThresholdPercent: existing?.alertThresholdPercent ?? 85 });
+        }
       }
-    };
-    if (a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts') {
-      await updateGoal(goal.id, { targetDate: a.date });
-      onDeadlineChange(a.date);
+      if (a.kind === 'pause_goals') for (const id of a.goalIds) await updateGoal(id, { isPaused: true });
     }
-    if (a.kind === 'set_target') await updateGoal(goal.id, { targetCents: a.cents });
-    if (a.kind === 'budget_cuts' || a.kind === 'deadline_and_cuts') await setBudgets(a.cuts);
-    if (a.kind === 'pause_goals') for (const id of a.goalIds) await updateGoal(id, { isPaused: true });
+    if (server !== false && (a.kind === 'set_deadline' || a.kind === 'deadline_and_cuts')) onDeadlineChange(a.date);
     setBusy(null);
-    setApplied(c.id);
+    if (server !== false) setApplied(c.id);
   };
 
   return (
@@ -161,16 +165,28 @@ function ContingencyOptions({ goal, options, onDeadlineChange }: { goal: Savings
                 )}
               </div>
               <p className="text-slate-600 leading-relaxed">{c.summary}</p>
-              {actionable && (
+              {actionable && confirming === c.id ? (
+                <div className="wp-pop rounded-xl border border-sky-200 bg-sky-50 p-2.5">
+                  <p className="text-[11px] font-semibold text-sky-900">{describeAction(goal, c.action)}</p>
+                  <div className="mt-2 flex gap-1.5">
+                    <button onClick={() => apply(c)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Yes, apply
+                    </button>
+                    <button onClick={() => setConfirming(null)} className="px-3 py-1.5 rounded-full font-bold text-slate-600 hover:text-slate-900 cursor-pointer">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : actionable ? (
                 <button
-                  onClick={() => apply(c)}
+                  onClick={() => setConfirming(c.id)}
                   disabled={busy !== null || applied === c.id}
                   className="self-start inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0F172A] hover:bg-slate-800 text-white font-bold disabled:opacity-50 cursor-pointer"
                 >
                   {busy === c.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   {applied === c.id ? 'Applied' : 'Apply'}
                 </button>
-              )}
+              ) : null}
             </li>
           );
         })}
@@ -182,6 +198,7 @@ function ContingencyOptions({ goal, options, onDeadlineChange }: { goal: Savings
 /** AI goal planner. Shows the saved plan instantly; "Recalculate" calls the server and saves the new plan. */
 export function GoalPlanDialog({ goalId, onClose }: { goalId: string; onClose: () => void }) {
   const { goals, preferences, updateGoal, planGoal, contributeToGoal } = useFinance();
+  const insightReport = useInsights();
   const goal = goals.find((g) => g.id === goalId) as SavingsGoal | undefined;
   const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '');
   const [loading, setLoading] = useState(false);
@@ -203,7 +220,7 @@ export function GoalPlanDialog({ goalId, onClose }: { goalId: string; onClose: (
 
   if (!goal) return null;
   const plan = goal.plan;
-  const stale = plan && !justSaved ? planStaleReason(goal) : null;
+  const stale = plan && !justSaved ? planStaleReason(goal, undefined, insightReport.averages) : null;
   const percent = goal.targetCents > 0 ? Math.min(100, Math.round((goal.currentCents / goal.targetCents) * 100)) : 0;
   const realisticDate = plan ? factText(plan, 'Realistic finish date') : null;
 
@@ -250,11 +267,12 @@ export function GoalPlanDialog({ goalId, onClose }: { goalId: string; onClose: (
         </div>
 
         <div className="overflow-y-auto px-6 py-5 space-y-5">
-          {!isSignedIn ? (
-            <p className="text-slate-600 font-medium leading-relaxed">
-              Sign in to get a plan based on your real income and spending. Demo data is not used for planning.
+          {!isSignedIn && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+              Demo: this plan is calculated in your browser from the sample data. Sign in to plan with your own income and spending.
             </p>
-          ) : (
+          )}
+          {(
             <>
               {/* Deadline + presets */}
               <section aria-label="Deadline" className="space-y-2.5">

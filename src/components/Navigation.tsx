@@ -481,9 +481,15 @@ export function Navigation({
                     </button>
 
                     <button
-                      onClick={() => {
-                        logout();
+                      onClick={async () => {
                         setUserMenuOpen(false);
+                        await logout();
+                        if (onOpenLanding) {
+                          onOpenLanding();
+                        } else if (typeof window !== 'undefined') {
+                          window.location.hash = '#landing';
+                        }
+                        setActiveTab('overview');
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer"
                     >
@@ -595,10 +601,28 @@ export function Navigation({
                       setMobileMenuOpen(false);
                       onOpenAuth('signin');
                     }}
-                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold border border-sky-200 transition-colors"
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 text-xs font-bold border border-sky-200 transition-colors cursor-pointer"
                   >
                     <LogIn className="w-3.5 h-3.5 text-sky-600" />
                     <span>Switch User</span>
+                  </button>
+                )}
+                {isSignedIn && (
+                  <button
+                    onClick={async () => {
+                      setMobileMenuOpen(false);
+                      await logout();
+                      if (onOpenLanding) {
+                        onOpenLanding();
+                      } else if (typeof window !== 'undefined') {
+                        window.location.hash = '#landing';
+                      }
+                      setActiveTab('overview');
+                    }}
+                    className="col-span-2 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold border border-amber-200 transition-colors cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Sign Out</span>
                   </button>
                 )}
               </div>

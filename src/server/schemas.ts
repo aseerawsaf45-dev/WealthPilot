@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { scanAndEnforcePciDssScope } from '@/lib/compliance/pciDssCompliance';
+import { isIsoCurrency } from '@/lib/currency';
 
 export const money = z.number().int().safe();
 const nonNegMoney = money.nonnegative();
@@ -23,7 +24,12 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 const noPan = (max: number) =>
   z.string().trim().max(max).refine((s) => scanAndEnforcePciDssScope(s).isCompliant, 'Remove card numbers from this field');
 
-export const Currency = z.enum(['USD', 'BDT', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CNY']);
+/** Any active ISO 4217 code (see src/lib/currency.ts). */
+export const Currency = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .refine(isIsoCurrency, 'Unknown currency code');
 const id = z.string().min(1).max(40);
 
 // ---- Accounts ---------------------------------------------------------------
@@ -204,6 +210,7 @@ export const PreferencesPatch = z
           xp: z.number().int().min(0).max(1_000_000),
           streak: z.number().int().min(0).max(10_000),
           completed: z.array(z.string().max(60)).max(200),
+          lastActive: ymd.optional(), // drives the daily streak
         }),
       })
       .partial()
@@ -212,8 +219,14 @@ export const PreferencesPatch = z
   })
   .partial();
 
+// 'documents' = separate opt-in to let Groq structure text read from receipts/statements (never Gemini).
 export const AiConsentInput = z.object({
-  providers: z.array(z.enum(['groq', 'gemini'])).min(1).max(2).default(['groq']),
+  providers: z
+    .array(z.enum(['groq', 'gemini', 'documents']))
+    .min(1)
+    .max(3)
+    .default(['groq'])
+    .refine((p) => !p.includes('documents') || p.includes('groq'), 'Document reading needs Groq to be allowed'),
 });
 
 export const PasswordConfirm = z.object({ password: z.string().min(1).max(128) });

@@ -1,9 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { Transaction, TransactionSplit } from '../types/finance';
-import { formatMoney, dollarsToCents, centsToDollars, validateSplitPreservation } from '../lib/money';
+import { formatMoney, displaySymbol, dollarsToCents, fromMinor, validateSplitPreservation } from '../lib/money';
+import { sumConverted } from '../lib/fx';
+import { todayYmd, useToday } from '../lib/dates';
+import { onUi, peekPendingFilter, takePendingFilter } from '../lib/uiBus';
+import { PageInsights } from './PageInsights';
+import { useInsights } from '../context/useInsights';
 import { exportTransactionsToCsv } from '../services/importService';
 import { CashFlowRhythmChart } from './InteractiveCharts';
 import {
@@ -29,9 +34,23 @@ export function TransactionsTab() {
     addTransaction,
     updateTransaction,
     deleteTransaction,
+    preferences,
+    fx,
   } = useFinance();
+  const baseCurrency = preferences.baseCurrency || 'USD';
+  const insightReport = useInsights();
+  const unusual = new Map(insightReport.anomalies.filter((a) => a.id).map((a) => [a.id!, a]));
+  const suggested = new Map(insightReport.categorySuggestions.filter((c) => c.id).map((c) => [c.id!, c.suggestion]));
+  const accountCurrency = (accountId: string) => accounts.find((a) => a.id === accountId)?.currency ?? baseCurrency;
 
-  const [searchTerm, setSearchTerm] = useState('');
+  // An insight elsewhere ("Find it") can filter this list, before or after this tab mounts.
+  const [searchTerm, setSearchTerm] = useState(() => peekPendingFilter() ?? '');
+  useEffect(() => {
+    takePendingFilter();
+    return onUi((e) => {
+      if (e.type === 'filter-transactions') setSearchTerm(takePendingFilter() ?? e.query);
+    });
+  }, []);
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedAccount, setSelectedAccount] = useState('ALL');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -42,7 +61,8 @@ export function TransactionsTab() {
   const [splitModalTx, setSplitModalTx] = useState<Transaction | null>(null);
 
   // New Transaction Form State
-  const [formDate, setFormDate] = useState('2026-10-16');
+  const today = useToday();
+  const [formDate, setFormDate] = useState('');
   const [formMerchant, setFormMerchant] = useState('');
   const [formAmount, setFormAmount] = useState('');
   const [formType, setFormType] = useState<'expense' | 'income'>('expense');
@@ -69,12 +89,20 @@ export function TransactionsTab() {
     return matchesSearch && matchesCategory && matchesAccount && matchesDate;
   });
 
-  const totalInflowCents = filteredTxs.filter((t) => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0);
-  const totalOutflowCents = filteredTxs.filter((t) => t.amountCents < 0).reduce((s, t) => s + Math.abs(t.amountCents), 0);
+  // Totals are in the base currency; other currencies are converted at the daily rate (or left out if no rate).
+  const inflow = sumConverted(filteredTxs.filter((t) => t.amountCents > 0).map((t) => ({ amount: t.amountCents, currency: t.currency })), baseCurrency, fx);
+  const outflow = sumConverted(filteredTxs.filter((t) => t.amountCents < 0).map((t) => ({ amount: Math.abs(t.amountCents), currency: t.currency })), baseCurrency, fx);
+  const totalInflowCents = inflow.total;
+  const totalOutflowCents = outflow.total;
+  const totalsNote = [
+    inflow.converted || outflow.converted ? `Includes other currencies converted at the ${fx?.day} rate.` : '',
+    inflow.missing.length || outflow.missing.length ? `Not included (no rate): ${[...new Set([...inflow.missing, ...outflow.missing])].join(', ')}.` : '',
+  ].filter(Boolean).join(' ');
   const netFlowCents = totalInflowCents - totalOutflowCents;
 
   const openAdd = () => {
     setEditingId(null);
+    setFormDate(todayYmd());
     setFormMerchant('');
     setFormAmount('');
     setFormType('expense');
@@ -88,7 +116,7 @@ export function TransactionsTab() {
     setEditingId(t.id);
     setFormDate(t.financialDate);
     setFormMerchant(t.merchant);
-    setFormAmount((Math.abs(t.amountCents) / 100).toFixed(2));
+    setFormAmount(fromMinor(Math.abs(t.amountCents), t.currency));
     setFormType(t.amountCents < 0 ? 'expense' : 'income');
     setFormCategory(t.category);
     setFormAccount(t.accountId);
@@ -100,13 +128,13 @@ export function TransactionsTab() {
     e.preventDefault();
     if (!formMerchant.trim() || !formAmount.trim()) return;
 
-    const baseCents = dollarsToCents(formAmount);
+    const baseCents = dollarsToCents(formAmount, accountCurrency(formAccount));
     const amountCents = formType === 'expense' ? -Math.abs(baseCents) : Math.abs(baseCents);
 
     if (editingId) {
       await updateTransaction(editingId, {
         accountId: formAccount,
-        financialDate: formDate,
+        financialDate: formDate || today,
         merchant: formMerchant.trim(),
         category: formCategory,
         amountCents,
@@ -118,12 +146,12 @@ export function TransactionsTab() {
 
     addTransaction({
       accountId: formAccount,
-      financialDate: formDate,
+      financialDate: formDate || today,
       merchant: formMerchant.trim(),
       normalizedMerchant: formMerchant.trim(),
       category: formCategory,
       amountCents,
-      currency: 'USD',
+      currency: accountCurrency(formAccount),
       status: 'cleared',
       notes: formNotes.trim(),
       tags: [],
@@ -144,16 +172,16 @@ export function TransactionsTab() {
         tx.splits.map((s) => ({
           id: s.id,
           category: s.category,
-          amountDollars: centsToDollars(Math.abs(s.amountCents)).toFixed(2),
+          amountDollars: fromMinor(Math.abs(s.amountCents), tx.currency),
           note: s.note || '',
         }))
       );
     } else {
       // Default to 2 splits dividing 50/50
-      const half = Math.abs(tx.amountCents) / 2;
+      const half = Math.floor(Math.abs(tx.amountCents) / 2);
       setWorkingSplits([
-        { id: 'sp_1', category: tx.category, amountDollars: (half / 100).toFixed(2), note: 'Part 1' },
-        { id: 'sp_2', category: 'General', amountDollars: ((Math.abs(tx.amountCents) - half) / 100).toFixed(2), note: 'Part 2' },
+        { id: 'sp_1', category: tx.category, amountDollars: fromMinor(half, tx.currency), note: 'Part 1' },
+        { id: 'sp_2', category: 'General', amountDollars: fromMinor(Math.abs(tx.amountCents) - half, tx.currency), note: 'Part 2' },
       ]);
     }
   };
@@ -164,7 +192,7 @@ export function TransactionsTab() {
     // Convert working splits to cents
     const isNegative = splitModalTx.amountCents < 0;
     const splitsConverted: TransactionSplit[] = workingSplits.map((s, idx) => {
-      const cents = dollarsToCents(s.amountDollars);
+      const cents = dollarsToCents(s.amountDollars, splitModalTx.currency);
       return {
         id: s.id || `sp_${idx}`,
         category: s.category,
@@ -175,7 +203,7 @@ export function TransactionsTab() {
 
     const check = validateSplitPreservation(splitModalTx.amountCents, splitsConverted);
     if (!check.isValid) {
-      alert(`Split sum does not match transaction total! Discrepancy: ${formatMoney(check.differenceCents)}`);
+      alert(`Split sum does not match transaction total! Discrepancy: ${formatMoney(check.differenceCents, splitModalTx.currency)}`);
       return;
     }
 
@@ -224,6 +252,8 @@ export function TransactionsTab() {
         </div>
       </div>
 
+      <PageInsights segment="transactions" />
+
       {/* Quick Profit / Loss Summary Strip (Generous Luxury Padding & Frosted Glass) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="keel-card p-5 sm:p-6 flex items-center justify-between bg-emerald-50/70 border-emerald-300/80 shadow-xs">
@@ -252,6 +282,7 @@ export function TransactionsTab() {
           <span className={`w-3 h-3 rounded-full ${netFlowCents >= 0 ? 'bg-emerald-500 shadow-emerald-500/50' : 'bg-rose-500 shadow-rose-500/50'} shadow-xs animate-pulse`} />
         </div>
       </div>
+      {totalsNote && <p className="-mt-5 text-[11px] text-slate-500 font-medium">{totalsNote}</p>}
 
       {/* Interactive Cash Flow Rhythm Chart */}
       <CashFlowRhythmChart transactions={transactions} selectedDate={selectedDate} onSelectDate={setSelectedDate} />
@@ -342,6 +373,15 @@ export function TransactionsTab() {
                               Transfer
                             </span>
                           )}
+                          {unusual.has(t.id) && (
+                            <span
+                              title={`${unusual.get(t.id)!.multiple}× your usual ${unusual.get(t.id)!.category} amount`}
+                              className="wp-pop inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 font-mono font-bold"
+                            >
+                              <AlertTriangle className="w-2.5 h-2.5" />
+                              Unusual
+                            </span>
+                          )}
                           {hasSplits && (
                             <span className="inline-flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-800 border border-purple-200 font-mono font-medium">
                               <Split className="w-2.5 h-2.5" />
@@ -355,6 +395,16 @@ export function TransactionsTab() {
                         <span className="inline-block px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-800 font-semibold text-[11px]">
                           {t.category}
                         </span>
+                        {suggested.has(t.id) && (
+                          <button
+                            type="button"
+                            onClick={() => updateTransaction(t.id, { category: suggested.get(t.id)!.category })}
+                            title={`Suggested from ${suggested.get(t.id)!.source === 'your_history' ? 'your past choices' : 'the merchant name'}. Click to apply.`}
+                            className="btn-anim ml-1.5 inline-flex items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-800 hover:bg-sky-100 cursor-pointer"
+                          >
+                            → {suggested.get(t.id)!.category}
+                          </button>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-neutral-700 font-medium text-[11px] whitespace-nowrap">
                         {account ? account.name : 'Primary Account'}
@@ -362,11 +412,11 @@ export function TransactionsTab() {
                       <td className="py-3 px-4 text-right font-money font-bold text-xs whitespace-nowrap">
                         {isIncome ? (
                           <span className="text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-300 font-bold shadow-2xs">
-                            +{formatMoney(t.amountCents)}
+                            +{formatMoney(t.amountCents, t.currency)}
                           </span>
                         ) : (
                           <span className="text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-300 font-bold shadow-2xs">
-                            -{formatMoney(Math.abs(t.amountCents))}
+                            -{formatMoney(Math.abs(t.amountCents), t.currency)}
                           </span>
                         )}
                       </td>
@@ -424,7 +474,7 @@ export function TransactionsTab() {
                 <label className="block text-slate-700 font-semibold mb-1">Financial Date</label>
                 <input
                   type="date"
-                  value={formDate}
+                  value={formDate || today}
                   onChange={(e) => setFormDate(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] font-medium focus:outline-none focus:ring-1 focus:ring-sky-500"
                   required
@@ -547,7 +597,7 @@ export function TransactionsTab() {
               <div>
                 <h3 className="text-base font-bold text-[#0F172A]">Split Transaction</h3>
                 <p className="text-[11px] text-slate-600 font-medium">
-                  {splitModalTx.merchant} — Total: <span className="text-[#0F172A] font-money font-bold">{formatMoney(splitModalTx.amountCents)}</span>
+                  {splitModalTx.merchant} — Total: <span className="text-[#0F172A] font-money font-bold">{formatMoney(splitModalTx.amountCents, splitModalTx.currency)}</span>
                 </p>
               </div>
               <button onClick={() => setSplitModalTx(null)} className="text-slate-500 hover:text-black">

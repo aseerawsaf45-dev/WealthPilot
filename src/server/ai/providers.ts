@@ -19,6 +19,9 @@ export interface LlmMessage {
 export interface LlmRequest {
   messages: LlmMessage[];
   tools?: { type: 'function'; function: { name: string; description: string; parameters: unknown } }[];
+  /** Ask for a JSON object reply (document extraction). */
+  json?: boolean;
+  maxTokens?: number;
 }
 
 /** The orchestrator depends on this shape only, so tests and evals can pass a fake. */
@@ -34,14 +37,15 @@ export class ProviderError extends Error {
 const TIMEOUT_MS = 8000;
 
 function openAiCompatibleClient(name: ProviderName, url: string, key: string, model: string, extra: Record<string, unknown>): LlmClient {
-  return async ({ messages, tools }) => {
+  return async ({ messages, tools, json, maxTokens }) => {
     const body = {
       model,
       messages: messages.map(({ provider: _provider, ...m }) => m), // never send our own bookkeeping field
-      temperature: 0.2,
-      max_completion_tokens: 700,
+      temperature: json ? 0 : 0.2,
+      max_completion_tokens: Math.min(maxTokens ?? 700, 1500),
       ...extra,
       ...(tools?.length && { tools, tool_choice: 'auto' }),
+      ...(json && { response_format: { type: 'json_object' } }),
     };
 
     for (let attempt = 0; attempt < 2; attempt++) {

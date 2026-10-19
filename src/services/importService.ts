@@ -1,6 +1,6 @@
 // CSV Import, Parsing, Validation, and Duplicate Fingerprinting Service
 import { Transaction } from '../types/finance';
-import { dollarsToCents, sanitizeCsvCell } from '../lib/money';
+import { dollarsToCents, fromMinor, sanitizeCsvCell } from '../lib/money';
 
 export interface CsvPreview {
   headers: string[];
@@ -180,13 +180,14 @@ export function processCsvData(
  * Protects against CSV formula injection by wrapping cells with single quotes if they start with formula triggers.
  */
 export function exportTransactionsToCsv(transactions: Transaction[]): string {
-  const headers = ['ID', 'Date', 'Merchant', 'Category', 'Amount (USD)', 'Status', 'Account ID', 'Notes'];
+  const headers = ['ID', 'Date', 'Merchant', 'Category', 'Amount', 'Currency', 'Status', 'Account ID', 'Notes'];
   const rows = transactions.map((t) => [
     sanitizeCsvCell(t.id),
     sanitizeCsvCell(t.financialDate),
     sanitizeCsvCell(t.merchant),
     sanitizeCsvCell(t.category),
-    sanitizeCsvCell((t.amountCents / 100).toFixed(2)),
+    sanitizeCsvCell(fromMinor(t.amountCents, t.currency)),
+    sanitizeCsvCell(t.currency),
     sanitizeCsvCell(t.status),
     sanitizeCsvCell(t.accountId),
     sanitizeCsvCell(t.notes || ''),

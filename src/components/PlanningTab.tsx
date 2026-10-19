@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageInsights } from './PageInsights';
 import { useFinance } from '../context/FinanceContext';
 import { DebtAccount } from '../types/finance';
 import { calculateDebtPayoffSchedule } from '../services/debtService';
-import { formatMoney, dollarsToCents } from '../lib/money';
+import { formatMoney, displaySymbol, dollarsToCents, fromMinor, toMinor } from '../lib/money';
 import { DebtPayoffTrajectoryChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
 import {
@@ -21,7 +22,10 @@ import {
 
 export function PlanningTab() {
   const { debts, addDebt, updateDebt, deleteDebt } = useFinance();
-  const [extraPaymentDollars, setExtraPaymentDollars] = useState(250);
+  // Extra monthly payment in major units of the base currency; the slider scales with your minimum payments.
+  const minimumsCents = debts.reduce((sum, d) => sum + d.minimumPaymentCents, 0);
+  const sliderMax = Math.max(100, Math.round(Number(fromMinor(minimumsCents * 2)) / 10) * 10 || 2000);
+  const [extraPaymentDollars, setExtraPaymentDollars] = useState(() => Math.round(sliderMax / 8));
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -32,7 +36,7 @@ export function PlanningTab() {
   const [minPayment, setMinPayment] = useState('');
   const [category, setCategory] = useState<'credit_card' | 'student_loan' | 'car_loan' | 'mortgage' | 'personal_loan'>('credit_card');
 
-  const extraPaymentCents = extraPaymentDollars * 100;
+  const extraPaymentCents = dollarsToCents(extraPaymentDollars);
   const snowballSchedule = calculateDebtPayoffSchedule(debts, extraPaymentCents, 'snowball');
   const avalancheSchedule = calculateDebtPayoffSchedule(debts, extraPaymentCents, 'avalanche');
 
@@ -52,9 +56,9 @@ export function PlanningTab() {
   const openEdit = (d: DebtAccount) => {
     setEditingId(d.id);
     setName(d.name);
-    setBalance((d.balanceCents / 100).toString());
+    setBalance(fromMinor(d.balanceCents));
     setApr(d.aprPercent.toString());
-    setMinPayment((d.minimumPaymentCents / 100).toString());
+    setMinPayment(fromMinor(d.minimumPaymentCents));
     setCategory(d.category);
     setIsAddOpen(true);
   };
@@ -111,6 +115,8 @@ export function PlanningTab() {
         </button>
       </div>
 
+      <PageInsights segment="debts" scope="planning" />
+
       {/* Interactive Extra Payment Slider */}
       <div className="keel-card p-6 sm:p-7 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -126,7 +132,7 @@ export function PlanningTab() {
           <div className="flex items-center gap-2 text-sm bg-sky-50/80 px-4 py-1.5 rounded-full border border-sky-200">
             <span className="text-sky-800 font-medium text-xs">Extra Principal:</span>
             <span className="font-money font-bold text-sky-900 text-base">
-              ${extraPaymentDollars.toLocaleString()}
+              {formatMoney(extraPaymentCents)}
             </span>
           </div>
         </div>
@@ -134,27 +140,28 @@ export function PlanningTab() {
         <input
           type="range"
           min="0"
-          max="2000"
-          step="25"
+          max={sliderMax}
+          step={Math.max(1, Math.round(sliderMax / 80))}
           value={extraPaymentDollars}
           onChange={(e) => setExtraPaymentDollars(parseInt(e.target.value) || 0)}
           className="w-full accent-sky-500 cursor-pointer h-2 bg-slate-200 rounded-lg"
         />
 
         <div className="flex justify-between text-[10px] sm:text-[11px] text-slate-500 font-mono font-medium">
-          <span>$0 (Baseline)</span>
-          <span className="hidden sm:inline">+$500/mo</span>
-          <span className="hidden sm:inline">+$1,000/mo</span>
-          <span className="font-bold text-sky-700">+$2,000/mo (Max Turbo)</span>
+          <span>Minimums only</span>
+          <span className="hidden sm:inline">+{formatMoney(toMinor(Math.round(sliderMax / 4)))}/mo</span>
+          <span className="hidden sm:inline">+{formatMoney(toMinor(Math.round(sliderMax / 2)))}/mo</span>
+          <span className="font-bold text-sky-700">+{formatMoney(toMinor(sliderMax))}/mo</span>
         </div>
 
         {/* Interactive Amortization Trajectory Chart */}
         <div className="pt-4 border-t border-slate-100">
           <DebtPayoffTrajectoryChart
-            totalDebtCents={totalDebtCents}
+            snowballBalances={snowballSchedule.balanceByMonth ?? []}
+            avalancheBalances={avalancheSchedule.balanceByMonth ?? []}
             snowballMonths={snowballSchedule.totalMonths}
             avalancheMonths={avalancheSchedule.totalMonths}
-            extraPaymentDollars={extraPaymentDollars}
+            extraPaymentCents={extraPaymentCents}
             interestSavedCents={interestSavedCents}
           />
         </div>
@@ -333,7 +340,7 @@ export function PlanningTab() {
 
               <div className="grid grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Remaining Balance ($)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Remaining Balance ({displaySymbol()})</label>
                   <input
                     type="number"
                     step="0.01"
@@ -359,7 +366,7 @@ export function PlanningTab() {
               </div>
 
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">Monthly Minimum Payment ($)</label>
+                <label className="block text-slate-700 font-semibold mb-1">Monthly Minimum Payment ({displaySymbol()})</label>
                 <input
                   type="number"
                   step="0.01"

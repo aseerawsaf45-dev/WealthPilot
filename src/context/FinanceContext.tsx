@@ -24,6 +24,9 @@ import {
 } from '../lib/seedData';
 import { autoCategorizeMerchant } from '../services/financeService';
 import { api, ApiError } from '../lib/api';
+import { setDisplayCurrency } from '../lib/money';
+import { demoGoalPlan } from '../lib/demoPlan';
+import type { FxRates } from '../lib/fx';
 import { useChatHistory, type ChatSummary } from './useChatHistory';
 
 /**
@@ -50,6 +53,7 @@ interface Bootstrap {
   bills: BillSubscription[];
   debts: DebtAccount[];
   auditLogs: AuditEvent[];
+  fx?: FxRates | null;
 }
 
 interface FinanceContextType {
@@ -61,6 +65,8 @@ interface FinanceContextType {
   debts: DebtAccount[];
   preferences: UserPreferences;
   auditLogs: AuditEvent[];
+  /** Today's exchange rates (signed in); null when unavailable. Converted totals are estimates. */
+  fx: FxRates | null;
   copilotHistory: CopilotMessage[];
   isReady: boolean;
   /** True while a save is in flight (signed in). */
@@ -71,6 +77,8 @@ interface FinanceContextType {
   // Actions
   addTransaction: (tx: NewTransaction) => Promise<void>;
   updateTransaction: (id: string, updates: Partial<Transaction>) => Promise<void>;
+  /** Applies confirmed category suggestions in one request. */
+  recategorizeTransactions: (items: Array<{ id: string; category: string }>) => Promise<boolean>;
   deleteTransaction: (id: string) => Promise<void>;
   addAccount: (acc: Omit<FinancialAccount, 'id' | 'userId' | 'lastSyncedAt'>) => Promise<void>;
   updateAccount: (id: string, updates: Partial<FinancialAccount>) => Promise<boolean>;
@@ -86,6 +94,8 @@ interface FinanceContextType {
   contributeToGoal: (id: string, amountCents: number) => Promise<boolean>;
   /** Calculates and saves the AI plan on the goal; errors are returned for inline display. */
   planGoal: (id: string, targetDate?: string) => Promise<{ plan?: GoalPlanSnapshot; error?: string }>;
+  /** Signed in: applies a saved plan option on the server in one transaction. Returns false when not handled (demo). */
+  applyGoalPlanOption: (goalId: string, optionId: string) => Promise<boolean | null>;
   addBill: (bill: Omit<BillSubscription, 'id' | 'userId'>) => Promise<void>;
   updateBill: (id: string, updates: Partial<BillSubscription>) => Promise<boolean>;
   deleteBill: (id: string) => Promise<void>;
@@ -161,6 +171,11 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [preferences, setPreferencesState] = useState<UserPreferences>({ ...defaultPreferences, isAuthenticated: false });
   const [copilotHistory, setCopilotHistory] = useState<CopilotMessage[]>([welcomeMessage]);
   const [auditLogs, setAuditLogs] = useState<AuditEvent[]>([]);
+  const [fx, setFx] = useState<FxRates | null>(null);
+
+  // Every formatMoney() call without an explicit currency shows the user's base currency.
+  // Set during render (idempotent) so children never render one frame in the old currency.
+  setDisplayCurrency(preferences.baseCurrency || 'USD', preferences.locale || undefined);
 
   const isAuthed = preferences.isAuthenticated === true;
   const pendingPrefs = useRef<Record<string, unknown>>({});
@@ -181,6 +196,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setBills(data.bills);
     setDebts(data.debts);
     setAuditLogs(data.auditLogs);
+    if (data.fx !== undefined) setFx(data.fx);
     setPreferencesState({ ...defaultPreferences, ...data.preferences, isAuthenticated: true });
   };
 
@@ -196,6 +212,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setBills(initialBills);
     setDebts(initialDebts);
     setAuditLogs([]);
+    setFx(null);
     setCopilotHistory([welcomeMessage]);
     chatHistory.resetChats();
     setPreferencesState({ ...defaultPreferences, isAuthenticated: false });
@@ -270,6 +287,20 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       });
       setTransactions((prev) => [res.transaction, ...prev]);
       replaceAccount(res.account);
+    });
+  };
+
+  const recategorizeTransactions = async (items: Array<{ id: string; category: string }>) => {
+    if (!items.length) return true;
+    const byId = new Map(items.map((i) => [i.id, i.category]));
+    if (!isAuthed) {
+      setTransactions((prev) => prev.map((t) => (byId.has(t.id) ? { ...t, category: byId.get(t.id)! } : t)));
+      return true;
+    }
+    return run(async () => {
+      const res = await api.post<{ transactions: Transaction[] }>('/transactions/recategorize', { items: items.slice(0, 100) });
+      const updated = new Map(res.transactions.map((t) => [t.id, t]));
+      setTransactions((prev) => prev.map((t) => updated.get(t.id) ?? t));
     });
   };
 
@@ -404,6 +435,15 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const applyGoalPlanOption = async (goalId: string, optionId: string): Promise<boolean | null> => {
+    if (!isAuthed) return null; // demo: the dialog applies the option with the regular actions
+    return run(async () => {
+      const res = await api.post<{ goals: SavingsGoal[]; budgets: BudgetCategory[] }>(`/goals/${encodeURIComponent(goalId)}/plan/apply`, { optionId });
+      setGoals(res.goals);
+      setBudgets(res.budgets);
+    });
+  };
+
   const addBill = async (bill: Omit<BillSubscription, 'id' | 'userId'>) => {
     if (!isAuthed) {
       setBills((prev) => [...prev, { ...bill, id: `bill_${Date.now()}`, userId: preferences.userId }]);
@@ -496,7 +536,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   };
 
   const planGoal = async (id: string, targetDate?: string): Promise<{ plan?: GoalPlanSnapshot; error?: string }> => {
-    if (!isAuthed) return { error: 'Sign in to get a plan based on your real income and spending.' };
+    if (!isAuthed) {
+      const goal = goals.find((g) => g.id === id);
+      if (!goal) return { error: 'Goal not found.' };
+      const plan = demoGoalPlan(goal, { transactions, budgets, goals, bills, debts, currency: preferences.baseCurrency || 'USD' }, targetDate);
+      setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, plan, planUpdatedAt: new Date().toISOString() } : g)));
+      return { plan };
+    }
     setPendingCount((n) => n + 1);
     try {
       const res = await api.post<{ plan: GoalPlanSnapshot; goal: SavingsGoal }>(`/goals/${encodeURIComponent(id)}/plan`, targetDate ? { targetDate } : {});
@@ -723,6 +769,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     await api.post('/auth/logout').catch(() => null); // the cookie is cleared server-side; local state resets regardless
     resetToSeed();
+    if (typeof window !== 'undefined') {
+      window.location.hash = '#landing';
+    }
   };
 
   const deleteAccount = async (password: string): Promise<{ success: boolean; message?: string }> => {
@@ -730,6 +779,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await api.del<{ message: string }>('/auth/account', { password });
       resetToSeed();
+      if (typeof window !== 'undefined') {
+        window.location.hash = '#landing';
+      }
       return { success: true, message: res.message };
     } catch (e) {
       return { success: false, message: e instanceof Error ? e.message : 'Account deletion failed.' };
@@ -750,10 +802,12 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         copilotHistory,
         isReady,
         isSaving: pendingCount > 0,
+        fx,
         syncError,
         clearSyncError: () => setSyncError(null),
         addTransaction,
         updateTransaction,
+        recategorizeTransactions,
         deleteTransaction,
         addAccount,
         updateAccount,
@@ -766,6 +820,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         deleteGoal,
         contributeToGoal,
         planGoal,
+        applyGoalPlanOption,
         addBill,
         updateBill,
         deleteBill,

@@ -12,6 +12,7 @@ import { rateLimit } from '@/server/rateLimit';
 import { ymd } from '@/server/schemas';
 import { loadCopilotContext } from '@/server/ai/data';
 import { resolveLlm } from '@/server/ai/gate';
+import { canUseLlm } from '@/server/ai/privacy';
 import { answerQuestion, fillPlaceholders } from '@/server/ai/orchestrator';
 import { planGoal } from '@/server/ai/tools';
 import { saveGoalPlan } from '@/server/repos/planning';
@@ -26,18 +27,19 @@ const PLAN_QUESTION = 'Explain whether this savings goal is reachable by its dea
 export const POST = authed<IdContext>(async (request, { userId }, ctx) => {
   const { id } = await ctx.params;
   const { targetDate } = await parseBody(request, Body);
-  await rateLimit('ai:min', [userId], 5, 60);
 
   const { consent, data } = await loadCopilotContext(userId);
+  // Calculated-only plans don't use the AI quota; AI-worded ones share the copilot's 5/min.
+  const aiAllowed = canUseLlm(consent, 'groq') || canUseLlm(consent, 'gemini');
+  await rateLimit(aiAllowed ? 'ai:min' : 'plan:calc', [userId], aiAllowed ? 5 : 20, 60);
   const goal = data.goals.find((g) => g.id === id);
   if (!goal) throw new HttpError('NOT_FOUND', 'Goal not found.', 404);
-  // planGoal matches by name; putting this goal first makes duplicate names resolve to it.
-  const scoped = { ...data, goals: [goal, ...data.goals.filter((g) => g !== goal)] };
   const args = { goalName: goal.name, ...(targetDate && { targetDate }) };
 
-  const { llm, limitations } = await resolveLlm(userId, consent);
-  const plan = planGoal(args, scoped);
-  const answer = await answerQuestion(PLAN_QUESTION, scoped, { llm, limitations }, { calls: [{ name: 'plan_goal', args }], narrate: true });
+  const { llm, limitations } = aiAllowed ? await resolveLlm(userId, consent) : { llm: null, limitations: [] };
+  // Matched by id (two goals may share a name), calculated once and handed to the narrator as-is.
+  const plan = planGoal({ ...args, goalId: goal.id }, data);
+  const answer = await answerQuestion(PLAN_QUESTION, data, { llm, limitations }, { calls: [{ name: 'plan_goal', args }], outputs: [plan], narrate: true });
 
   // plan_goal is the only call, so its fact #i is fact f(i+1) in the answer.
   const factMap = new Map(answer.facts.map((f) => [f.id, f]));
@@ -54,7 +56,13 @@ export const POST = authed<IdContext>(async (request, { userId }, ctx) => {
     limitations: answer.limitations,
     source: answer.source,
     targetDate: targetDate ?? goal.targetDate ?? null,
-    basis: { targetCents: goal.targetCents, currentCents: goal.currentCents, targetDate: goal.targetDate ?? null },
+    basis: {
+      targetCents: goal.targetCents,
+      currentCents: goal.currentCents,
+      targetDate: goal.targetDate ?? null,
+      avgIncomeCents: plan.averages?.incomeCents,
+      avgSpendingCents: plan.averages?.spendingCents,
+    },
   };
   // Saved on the goal so the card shows it and reopening needs no recalculation (or AI quota).
   return ok({ plan: snapshot, goal: await saveGoalPlan(userId, id, snapshot) });

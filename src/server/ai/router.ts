@@ -55,24 +55,25 @@ export function detectCategory(q: string, categories: string[]): string | undefi
 }
 
 /** "600 dollars a month", "$600/month", "250.50 per month" → integer cents; undefined when absent. */
-export function detectMonthlyAmount(q: string): number | undefined {
-  const m = q.match(/\$?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:dollars?|usd|taka|bdt)?\s*(?:a|per|each|every|\/)\s*month/);
+export function detectMonthlyAmount(q: string, currency = 'USD'): number | undefined {
+  const m = q.match(/\$?\s?(\d[\d,]*(?:\.\d{1,3})?)\s*(?:dollars?|usd|taka|bdt|[a-z]{3})?\s*(?:a|per|each|every|\/)\s*month/);
   if (!m) return undefined;
-  const cents = dollarsToCents(m[1].replace(/,/g, ''));
+  const cents = dollarsToCents(m[1].replace(/,/g, ''), currency);
   return cents > 0 ? cents : undefined;
 }
 
-export function routeIntent(message: string, today: string, categories: string[]): ToolCall[] | null {
+export function routeIntent(message: string, today: string, categories: string[], currency = 'USD'): ToolCall[] | null {
   const q = message.toLowerCase();
   const { period, previous } = detectPeriod(q, today);
   const range = { from: period.start, to: period.end };
 
   if (has(q, ['duplicate', 'double charge', 'charged twice'])) return [{ name: 'find_possible_duplicates', args: {} }];
+  if (has(q, ['unusual', 'anomal', 'stand out', 'stands out', 'forecast', 'predict', 'run out of', 'runway', 'recurring', 'anything wrong', 'insight'])) return [{ name: 'get_insights', args: {} }];
   if (has(q, ['budget', 'overspen', 'over spen'])) return [{ name: 'get_budget_status', args: { month: period.start.slice(0, 7) } }];
   if (has(q, ['bill', 'due', 'subscription', 'upcoming payment'])) return [{ name: 'get_upcoming_bills', args: { days: 30 } }];
   if (has(q, ['debt', 'snowball', 'avalanche', 'payoff', 'pay off', 'loan', 'credit card'])) return [{ name: 'get_debt_summary', args: {} }];
   if (has(q, ['goal', 'saving for', 'save for', 'emergency fund', 'savings plan', 'my savings', 'on track to save'])) {
-    const monthlyCents = detectMonthlyAmount(q);
+    const monthlyCents = detectMonthlyAmount(q, currency);
     return [{ name: 'calculate_savings_plan', args: monthlyCents ? { monthlyCents } : {} }];
   }
 

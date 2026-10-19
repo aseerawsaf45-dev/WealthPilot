@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useFinance } from '../context/FinanceContext';
+import CurrencySelect from './CurrencySelect';
 import {
   X,
   Lock,
@@ -33,6 +34,7 @@ export function AuthModal({
 }: AuthModalProps) {
   const { preferences, login, signup } = useFinance();
   const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
+  const [signupCurrency, setSignupCurrency] = useState(preferences.baseCurrency || 'USD');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,7 +52,7 @@ export function AuthModal({
     setIsSuccess(false);
     if (initialMode === 'signin' && preferences.userName) {
       setName(preferences.userName);
-      setEmail(preferences.userEmail || `${preferences.userName.toLowerCase()}@wealthpilot.app`);
+      if (preferences.userEmail) setEmail(preferences.userEmail);
     }
   }, [initialMode, isOpen, preferences.userName, preferences.userEmail]);
 
@@ -101,7 +103,7 @@ export function AuthModal({
     try {
       if (mode === 'signup') {
         const targetName = name.trim() || 'Pilot';
-        await signup(targetName, targetEmail, password, preferences.baseCurrency === 'BDT' ? 'BDT' : 'USD');
+        await signup(targetName, targetEmail, password, signupCurrency);
         finishSuccess(`Welcome aboard, ${targetName}! Your ledger is saved to your account.`);
       } else {
         await login(targetEmail, password);
@@ -271,6 +273,15 @@ export function AuthModal({
                     className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all"
                   />
                 </div>
+              </div>
+            )}
+
+            {mode === 'signup' && (
+              <div>
+                <label htmlFor="signup-currency" className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Main currency
+                </label>
+                <CurrencySelect id="signup-currency" value={signupCurrency} onChange={setSignupCurrency} ariaLabel="Main currency" />
               </div>
             )}
 

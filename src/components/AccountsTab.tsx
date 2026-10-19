@@ -1,9 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageInsights } from './PageInsights';
 import { useFinance } from '../context/FinanceContext';
 import { FinancialAccount, AccountType } from '../types/finance';
-import { formatMoney, dollarsToCents } from '../lib/money';
+import { formatMoney, dollarsToCents, fromMinor } from '../lib/money';
+import { minorUnits, currencySymbol } from '../lib/currency';
+import { convertMinor } from '../lib/fx';
+import CurrencySelect from './CurrencySelect';
 import { AssetAllocationChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
 import {
@@ -19,7 +23,8 @@ import {
 } from 'lucide-react';
 
 export function AccountsTab() {
-  const { accounts, addAccount, updateAccount, removeAccount } = useFinance();
+  const { accounts, addAccount, updateAccount, removeAccount, preferences, fx } = useFinance();
+  const baseCurrency = preferences.baseCurrency || 'USD';
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string>('ALL');
@@ -30,6 +35,7 @@ export function AccountsTab() {
   const [type, setType] = useState<AccountType>('checking');
   const [balance, setBalance] = useState('');
   const [accountMask, setAccountMask] = useState('•••• 1234');
+  const [currency, setCurrency] = useState(baseCurrency);
 
   const openAdd = () => {
     setEditingId(null);
@@ -37,6 +43,7 @@ export function AccountsTab() {
     setInstitution('');
     setType('checking');
     setBalance('');
+    setCurrency(baseCurrency);
     setAccountMask('•••• 1234');
     setIsAddOpen(true);
   };
@@ -46,7 +53,8 @@ export function AccountsTab() {
     setName(acc.name);
     setInstitution(acc.institution);
     setType(acc.type);
-    setBalance((Math.abs(acc.balanceCents) / 100).toFixed(2));
+    setCurrency(acc.currency);
+    setBalance(fromMinor(Math.abs(acc.balanceCents), acc.currency));
     setAccountMask(acc.accountNumberMask);
     setIsAddOpen(true);
   };
@@ -63,7 +71,7 @@ export function AccountsTab() {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const baseCents = dollarsToCents(balance || '0');
+    const baseCents = dollarsToCents(balance || '0', currency);
     // Liabilities have negative balances
     const balanceCents = type === 'credit' || type === 'loan' ? -Math.abs(baseCents) : Math.abs(baseCents);
 
@@ -84,7 +92,7 @@ export function AccountsTab() {
       name: name.trim(),
       institution: institution.trim() || 'Manual Institution',
       type,
-      currency: 'USD',
+      currency,
       balanceCents,
       accountNumberMask: accountMask.trim(),
       isManual: true,
@@ -143,6 +151,8 @@ export function AccountsTab() {
         </button>
       </div>
 
+      <PageInsights segment="accounts" />
+
       {/* Interactive Asset Allocation & Liquidity Dashboard */}
       <AssetAllocationChart
         accounts={accounts}
@@ -200,8 +210,16 @@ export function AccountsTab() {
               <div className="pt-2">
                 <p className="text-[11px] text-slate-500 mb-0.5 font-semibold">Reconciled Balance</p>
                 <p className={`text-2xl sm:text-3xl font-bold font-money tracking-tight ${isNegative ? 'text-rose-600' : 'text-[#0F172A]'}`}>
-                  {formatMoney(acc.balanceCents)}
+                  {formatMoney(acc.balanceCents, acc.currency)}
                 </p>
+                {acc.currency !== baseCurrency && (() => {
+                  const approx = convertMinor(acc.balanceCents, acc.currency, baseCurrency, fx);
+                  return (
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      {approx === null ? `No ${baseCurrency} rate available; not converted` : `≈ ${formatMoney(approx, baseCurrency)} at the ${fx?.day} market rate`}
+                    </p>
+                  );
+                })()}
               </div>
 
               <div className="pt-3.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-medium">
@@ -270,17 +288,23 @@ export function AccountsTab() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Current Balance ($)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Current Balance ({currencySymbol(currency)})</label>
                   <input
                     type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    step={minorUnits(currency) ? (1 / 10 ** minorUnits(currency)).toString() : '1'}
+                    placeholder={minorUnits(currency) ? `0.${'0'.repeat(minorUnits(currency))}` : '0'}
                     value={balance}
                     onChange={(e) => setBalance(e.target.value)}
                     className="w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] font-money font-bold focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
                     required
                   />
                 </div>
+              </div>
+
+              <div>
+                <label htmlFor="account-currency" className="block text-slate-700 font-semibold mb-1">Currency</label>
+                <CurrencySelect id="account-currency" value={currency} onChange={setCurrency} disabled={!!editingId} ariaLabel="Account currency" />
+                {editingId && <p className="text-[11px] text-slate-500 mt-1">An account&apos;s currency can&apos;t change after it has transactions.</p>}
               </div>
 
               <div>

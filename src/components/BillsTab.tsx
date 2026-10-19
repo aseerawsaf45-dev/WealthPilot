@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageInsights } from './PageInsights';
 import { useFinance } from '../context/FinanceContext';
 import { BillSubscription } from '../types/finance';
-import { formatMoney, dollarsToCents } from '../lib/money';
+import { formatMoney, displaySymbol, dollarsToCents, fromMinor } from '../lib/money';
 import { BillsDrainTimelineChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
 import {
@@ -45,7 +46,7 @@ export function BillsTab() {
   const openEdit = (bill: BillSubscription) => {
     setEditingId(bill.id);
     setName(bill.name);
-    setAmount((bill.amountCents / 100).toString());
+    setAmount(fromMinor(bill.amountCents));
     setFrequency(bill.frequency);
     setNextDueDate(bill.nextDueDate);
     setCategory(bill.category);
@@ -122,6 +123,8 @@ export function BillsTab() {
           <span>Add Recurring Item</span>
         </button>
       </div>
+
+      <PageInsights segment="bills" />
 
       {/* Interactive 30-Day Liquidity Drain Timeline Chart */}
       <BillsDrainTimelineChart bills={bills} checkingBalanceCents={checkingBalanceCents} />
@@ -231,7 +234,7 @@ export function BillsTab() {
 
               <div className="grid grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Amount ($)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Amount ({displaySymbol()})</label>
                   <input
                     type="number"
                     step="0.01"

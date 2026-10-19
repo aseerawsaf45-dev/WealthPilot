@@ -241,7 +241,7 @@ export async function answerQuestion(
   message: string,
   data: FinanceData,
   deps: AnswerDeps,
-  opts: { calls?: ToolCall[]; narrate?: boolean; scope?: SegmentId; history?: Turn[]; followUp?: boolean; pending?: PendingCommand } = {}
+  opts: { calls?: ToolCall[]; narrate?: boolean; scope?: SegmentId; history?: Turn[]; followUp?: boolean; pending?: PendingCommand; outputs?: ToolOutput[] } = {}
 ): Promise<CopilotAnswer & { tools: string[] }> {
   const limitations = [...(deps.limitations ?? [])];
   const finish = (n: LlmNarration, source: CopilotAnswer['source'], a?: ReturnType<typeof assemble>, tools: string[] = []) => ({
@@ -306,7 +306,7 @@ export async function answerQuestion(
     ...data.transactions.flatMap((t) => [t.category, ...(t.splits ?? []).map((s) => s.category)]),
     ...data.budgets.map((b) => b.category),
   ];
-  let calls = opts.calls ?? (commandish ? null : routeIntent(question, data.today, categories));
+  let calls = opts.calls ?? (commandish ? null : routeIntent(question, data.today, categories, data.currency));
   const llmPicked = !calls;
   if (!calls) {
     const help = commandish ? COMMAND_HELP : HELP_TEXT;
@@ -328,9 +328,10 @@ export async function answerQuestion(
 
   const outputs: ToolOutput[] = [];
   const used: string[] = [];
-  for (const call of calls.slice(0, MAX_TOOL_CALLS)) {
+  for (const [i, call] of calls.slice(0, MAX_TOOL_CALLS).entries()) {
     try {
-      outputs.push(runTool(call.name, call.args, data));
+      // A caller that already ran the calculation passes its output (no second, possibly different, run).
+      outputs.push(opts.outputs?.[i] ?? runTool(call.name, call.args, data));
       used.push(call.name);
     } catch {
       limitations.push('One requested calculation had invalid parameters and was skipped.');

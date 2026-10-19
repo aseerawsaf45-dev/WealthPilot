@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageInsights } from './PageInsights';
+import { useInsights } from '../context/useInsights';
 import { useFinance } from '../context/FinanceContext';
 import { SavingsGoal } from '../types/finance';
-import { formatMoney, dollarsToCents } from '../lib/money';
+import { formatMoney, displaySymbol, dollarsToCents, fromMinor } from '../lib/money';
 import { GoalTrajectoryChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
 import { GoalPlanDialog, VERDICT_STYLE, planHeadline } from './GoalPlanDialog';
@@ -22,6 +24,7 @@ import {
 
 export function GoalsTab() {
   const { goals, addGoal, updateGoal, deleteGoal, contributeToGoal } = useFinance();
+  const insightReport = useInsights();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [planGoalId, setPlanGoalId] = useState<string | null>(null);
@@ -46,8 +49,8 @@ export function GoalsTab() {
   const openEdit = (g: SavingsGoal) => {
     setEditingId(g.id);
     setName(g.name);
-    setTarget((g.targetCents / 100).toString());
-    setCurrent((g.currentCents / 100).toString());
+    setTarget(fromMinor(g.targetCents));
+    setCurrent(fromMinor(g.currentCents));
     setDeadline(g.targetDate ?? '');
     setCategory(g.category);
     setPriority(g.priority);
@@ -116,6 +119,8 @@ export function GoalsTab() {
           <span>Create Goal</span>
         </button>
       </div>
+
+      <PageInsights segment="goals" />
 
       {/* Interactive Savings Horizon & Goal Acceleration Chart */}
       <GoalTrajectoryChart goals={goals} />
@@ -219,7 +224,7 @@ export function GoalsTab() {
                       {VERDICT_STYLE[g.plan.verdict].label}
                     </span>
                     <span className="text-[10px] text-slate-500 font-medium">
-                      {planStaleReason(g) ? (
+                      {planStaleReason(g, undefined, insightReport.averages) ? (
                         <span className="text-amber-700 font-bold">Out of date</span>
                       ) : (
                         g.planUpdatedAt && `Saved ${daysAgo(g.planUpdatedAt)}`
@@ -276,7 +281,7 @@ export function GoalsTab() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Target Amount ($)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Target Amount ({displaySymbol()})</label>
                   <input
                     type="number"
                     step="10"
@@ -289,7 +294,7 @@ export function GoalsTab() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Initial Seed ($)</label>
+                  <label className="block text-slate-700 font-semibold mb-1">Initial Seed ({displaySymbol()})</label>
                   <input
                     type="number"
                     step="10"

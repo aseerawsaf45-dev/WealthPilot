@@ -102,6 +102,8 @@ export interface DebtPayoffComparison {
   strategy: 'snowball' | 'avalanche';
   totalMonths: number;
   totalInterestPaidCents: number;
+  /** Total remaining balance at the start of each month (index 0 = today), ending at 0. */
+  balanceByMonth?: number[];
   monthlyExtraPaymentCents: number;
   debtOrder: Array<{
     id: string;
@@ -127,7 +129,7 @@ export interface UserPreferences {
   userName?: string;
   userEmail?: string;
   isAuthenticated?: boolean;
-  baseCurrency: string; // USD, EUR, GBP, CAD
+  baseCurrency: string; // any ISO 4217 code; goals, budgets, bills and debts are in this currency
   locale: string;
   timezone: string;
   theme: 'dark' | 'light' | 'system';
@@ -142,7 +144,7 @@ export interface UserPreferences {
   dateFormat: string;
   reducedMotion: boolean;
   /** Learn tab progress; saved to the account (uiPrefs) when signed in. */
-  learn?: { xp: number; streak: number; completed: string[] };
+  learn?: { xp: number; streak: number; completed: string[]; lastActive?: string };
   autoCategorizationRules: Array<{
     id: string;
     keyword: string;
@@ -234,7 +236,7 @@ export interface GoalPlanSnapshot {
   /** Deadline the plan was calculated for (null = no deadline; a date was suggested). */
   targetDate: string | null;
   /** Goal values at calculation time, to tell when the plan is out of date. */
-  basis: { targetCents: number; currentCents: number; targetDate: string | null };
+  basis: { targetCents: number; currentCents: number; targetDate: string | null; avgIncomeCents?: number; avgSpendingCents?: number };
 }
 
 export interface CopilotFact {

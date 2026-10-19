@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
+import { PageInsights } from './PageInsights';
 import { useFinance } from '../context/FinanceContext';
 import { BudgetCategory } from '../types/finance';
-import { formatMoney, dollarsToCents, calculateBudgetPace } from '../lib/money';
+import { formatMoney, displaySymbol, dollarsToCents, fromMinor, calculateBudgetPace } from '../lib/money';
 import { BudgetPacingGaugeChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
 import {
@@ -37,7 +38,7 @@ export function BudgetsTab() {
   const openEdit = (b: BudgetCategory) => {
     setEditingId(b.id);
     setCategory(b.category);
-    setAllocated((b.allocatedCents / 100).toString());
+    setAllocated(fromMinor(b.allocatedCents));
     setRollover(b.rolloverEnabled);
     setIsAddOpen(true);
   };
@@ -89,6 +90,8 @@ export function BudgetsTab() {
           <span>Add Budget Plan</span>
         </button>
       </div>
+
+      <PageInsights segment="budgets" />
 
       {/* Interactive Month Pacing & Runway Benchmark Gauge */}
       <BudgetPacingGaugeChart budgets={budgets} />
@@ -206,7 +209,7 @@ export function BudgetsTab() {
               </div>
 
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">Monthly Planned Limit ($)</label>
+                <label className="block text-slate-700 font-semibold mb-1">Monthly Planned Limit ({displaySymbol()})</label>
                 <input
                   type="number"
                   step="1"

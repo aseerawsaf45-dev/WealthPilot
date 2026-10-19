@@ -6,12 +6,20 @@ const MAX_AGE_DAYS = 30;
  * Why a saved goal plan no longer matches the goal, or null when it is current.
  * The plan stores the goal's values it was calculated from (`basis`).
  */
-export function planStaleReason(goal: SavingsGoal, now = new Date()): string | null {
+export function planStaleReason(
+  goal: SavingsGoal,
+  now = new Date(),
+  /** Today's average monthly income/spending; a > 15% move from what the plan used marks it out of date. */
+  current?: { incomeCents: number; expenseCents: number },
+): string | null {
   const { plan, planUpdatedAt } = goal;
   if (!plan) return null;
   if (plan.basis.targetCents !== goal.targetCents) return 'The goal target changed';
   if (plan.basis.currentCents !== goal.currentCents) return 'Your savings changed';
   if ((plan.basis.targetDate ?? null) !== (goal.targetDate ?? null)) return 'The deadline changed';
+  const moved = (then: number | undefined, nowCents: number) => then !== undefined && then > 0 && Math.abs(nowCents - then) * 100 > then * 15;
+  if (current && moved(plan.basis.avgIncomeCents, current.incomeCents)) return 'Your income changed';
+  if (current && moved(plan.basis.avgSpendingCents, current.expenseCents)) return 'Your spending changed';
   if (planUpdatedAt && now.getTime() - Date.parse(planUpdatedAt) > MAX_AGE_DAYS * 86_400_000) return 'Older than 30 days';
   return null;
 }

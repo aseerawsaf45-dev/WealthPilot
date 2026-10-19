@@ -12,6 +12,7 @@ import { ymd, monthYear } from '../schemas';
 import { addDays, billState, spendByCategory } from '../mappers';
 import type { FactDraft, SuggestedAction } from './schema';
 import type { Contingency } from '@/types/finance';
+import { buildInsights, monthlyEquivalent } from '@/lib/ml';
 
 // ---- Data the tools run on (already scoped to one user) ---------------------
 
@@ -30,9 +31,13 @@ export interface FinanceData {
   }[];
   budgets: { id?: string; category: string; allocatedCents: number; alertThresholdPercent: number; monthYear: string }[];
   goals: { id?: string; name: string; targetCents: number; currentCents: number; targetDate: string | null; isPaused: boolean }[]; // id: server-side only, never sent to a model
-  bills: { id?: string; name: string; amountCents: number; nextDueDate: string; status: string }[];
+  bills: { id?: string; name: string; amountCents: number; nextDueDate: string; status: string; frequency?: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'annual' }[];
   debts: { id?: string; name: string; balanceCents: number; aprPercent: number; minimumPaymentCents: number }[];
   accounts?: { id: string; name: string }[]; // only for resolving assistant commands
+  /** Base-currency balances (derived). Absent in older fixtures → insights treat them as 0. */
+  balances?: { liquidCents: number; assetsCents: number; liabilitiesCents: number };
+  /** Set when foreign-currency rows were converted to `currency` (totals become estimates). */
+  fxNote?: string;
 }
 
 export interface Period {
@@ -87,7 +92,8 @@ function spendIn(data: FinanceData, p: Period, category?: string): number {
 
 function otherCurrencyNote(data: FinanceData, p: Period): string[] {
   const other = data.transactions.some((t) => t.currency !== data.currency && inPeriod(t.financialDate, p));
-  return other ? [`Amounts in currencies other than ${data.currency} are not included in category totals.`] : [];
+  const notes = data.fxNote ? [data.fxNote] : [];
+  return other ? [...notes, `Amounts in currencies with no exchange rate are not included in category totals.`] : notes;
 }
 
 // ---- Argument schemas (validated before any tool runs) -----------------------
@@ -126,7 +132,7 @@ function financialSummary(args: { from: string; to: string }, data: FinanceData)
     period: p,
     facts,
     template: `Between ${p.start} and ${p.end}, ${parts.join('; in another currency, ')}. Transfers between your own accounts are excluded.`,
-    limitations: byCurrency.size > 1 ? ['Totals are shown per currency and never added across currencies.'] : [],
+    limitations: [...(data.fxNote ? [data.fxNote] : []), ...(byCurrency.size > 1 ? ['Totals are shown per currency and never added across currencies.'] : [])],
     actions: [{ label: 'Review transactions', action: 'open_transactions' }],
   };
 }
@@ -296,6 +302,8 @@ export interface GoalPlan extends ToolOutput {
   steps: string[]; // trusted text; facts referenced as {{#i}}
   milestones: { label: string; factIndex: number }[];
   contingencies: Contingency[]; // summary is trusted text with {{#i}} refs
+  /** Averages the plan used (saved with it, so a later change in income or spending marks it out of date). */
+  averages?: { incomeCents: number; spendingCents: number };
 }
 
 const MAX_PLAN_MONTHS = 600; // beyond 50 years a "later deadline" is not a real option
@@ -315,8 +323,9 @@ export function addMonthsYmd(ymd: string, months: number): string {
  * 3 complete months (months with no transactions are skipped), subtracts what other dated goals
  * need, then judges the monthly amount against the free surplus: ≤ 50% on track, ≤ 100% stretch.
  */
-export function planGoal(args: { goalName: string; targetDate?: string }, data: FinanceData): GoalPlan {
-  const goal = data.goals.find((g) => g.name === args.goalName);
+/** `goalId` is server-only (the route passes it); the model's arguments can only name a goal. */
+export function planGoal(args: { goalName: string; targetDate?: string; goalId?: string }, data: FinanceData): GoalPlan {
+  const goal = (args.goalId && data.goals.find((g) => g.id === args.goalId)) || data.goals.find((g) => g.name === args.goalName);
   if (!goal) {
     return { period: null, facts: [], template: 'I could not find that goal.', limitations: [], actions: [], verdict: 'no_data', steps: [], milestones: [], contingencies: [] };
   }
@@ -395,6 +404,15 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
   const comfortable = Math.floor(Math.max(0, free) / 2); // half the free surplus: room for surprises
   const realisticMonths = comfortable > 0 ? Math.ceil(remaining / comfortable) : null;
   const fRealisticDate = realisticMonths !== null ? add({ label: 'Realistic finish date', value: addMonthsYmd(data.today, realisticMonths), unit: 'date', kind: 'estimate' }) : -1;
+  // ML-05: ±20% on the saving rate gives a likely finish window instead of one exact date.
+  let etaRange = '';
+  if (comfortable > 0 && realisticMonths !== null && realisticMonths <= MAX_PLAN_MONTHS) {
+    const early = Math.ceil(remaining / Math.round(comfortable * 1.2));
+    const late = Math.ceil(remaining / Math.max(1, Math.round(comfortable * 0.8)));
+    const fEarly = add({ label: 'Earliest likely finish', value: addMonthsYmd(data.today, early), unit: 'date', kind: 'estimate' });
+    const fLate = add({ label: 'Latest likely finish', value: addMonthsYmd(data.today, Math.min(late, MAX_PLAN_MONTHS)), unit: 'date', kind: 'estimate' });
+    etaRange = `Saving a comfortable amount each month, you'd most likely finish between {{#${fEarly}}} and {{#${fLate}}}.`;
+  }
 
   let verdict: PlanVerdict;
   let monthly: number;
@@ -442,6 +460,7 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
     if (realisticMonths !== null && deadline) steps.push(`Or keep your current budget and move the deadline to {{#${fRealisticDate}}}.`);
   }
   if (fOther >= 0) steps.push(`Your other dated goals already need {{#${fOther}}} a month; pause or re-date one if this goal matters more.`);
+  if (etaRange) steps.push(etaRange);
   steps.push('Review progress at each milestone below and adjust if your income or spending changes.');
 
   // Milestones at 25/50/75/100% of the target, at the planned monthly amount.
@@ -491,6 +510,7 @@ export function planGoal(args: { goalName: string; targetDate?: string }, data: 
     steps,
     milestones,
     contingencies,
+    averages: { incomeCents: avgIncome, spendingCents: avgSpending },
   };
 
   function contingencyOptions(): Contingency[] {
@@ -669,6 +689,72 @@ function possibleDuplicates(_args: Record<string, never>, data: FinanceData): To
   };
 }
 
+
+/** Runs the shared ML engine (src/lib/ml) on the session user's snapshot. Aggregates only. */
+export function insightReport(data: FinanceData) {
+  const b = data.balances ?? { liquidCents: 0, assetsCents: 0, liabilitiesCents: 0 };
+  return buildInsights({
+    today: data.today,
+    currency: data.currency,
+    transactions: data.transactions.filter((t) => t.currency === data.currency),
+    bills: data.bills,
+    budgets: data.budgets,
+    goals: data.goals,
+    debts: data.debts,
+    liquidCents: b.liquidCents,
+    assetsCents: b.assetsCents,
+    liabilitiesCents: b.liabilitiesCents,
+  });
+}
+
+function insightsTool(_args: Record<string, never>, data: FinanceData): ToolOutput {
+  const r = insightReport(data);
+  const facts: FactDraft[] = [];
+  const add = (f: FactDraft) => facts.push(f) - 1;
+  const parts: string[] = [];
+  const cur = data.currency;
+
+  const nAnom = add(count('Unusual charges in the last thirty days', r.anomalies.length));
+  parts.push(r.anomalies.length ? `unusual charges in the last 30 days: {{#${nAnom}}} (the largest is in ${r.anomalies[0].category})` : 'no unusual charges in the last 30 days');
+
+  const recurringOut = r.recurring.filter((s) => s.direction === 'expense');
+  if (recurringOut.length) {
+    const n = add(count('Recurring payments detected', recurringOut.length));
+    const m = add(money('Recurring payments per month', recurringOut.reduce((s, x) => s + monthlyEquivalent(x), 0), cur, 'estimate'));
+    const untracked = recurringOut.filter((x) => !x.matchesBill).length;
+    const u = add(count('Recurring payments not tracked as bills', untracked));
+    parts.push(`recurring payments found: {{#${n}}}, about {{#${m}}} a month in total (not yet tracked as bills: {{#${u}}})`);
+  }
+
+  if (r.forecast.minDataMet) {
+    const p = r.forecast.points[0];
+    const e = add(money('Expected cash in thirty days', p.expectedCents, cur, 'estimate'));
+    const lo = add(money('Low end of the thirty day range', p.lowCents, cur, 'estimate'));
+    const hi = add(money('High end of the thirty day range', p.highCents, cur, 'estimate'));
+    parts.push(`about {{#${e}}} in cash in 30 days (likely between {{#${lo}}} and {{#${hi}}})`);
+    if (r.forecast.shortfallDate) {
+      const d = add({ label: 'Date cash may run short', value: r.forecast.shortfallDate, unit: 'date', kind: 'estimate' });
+      parts.push(`cash may run short around {{#${d}}}`);
+    }
+  }
+  if (r.month.expenseChangePct !== null) {
+    const c = add(percent('Spending change versus the same days last month', Math.abs(r.month.expenseChangePct)));
+    parts.push(`spending is ${r.month.expenseChangePct >= 0 ? 'up' : 'down'} {{#${c}}} on the same days last month`);
+  }
+  if (r.runwayMonths !== null) {
+    const rw = add({ label: 'Months of spending covered by cash', value: r.runwayMonths, unit: 'months', kind: 'estimate' });
+    parts.push(`your cash covers {{#${rw}}} of spending`);
+  }
+
+  return {
+    period: { start: addDays(data.today, -30), end: data.today },
+    facts,
+    template: `Here is what stands out: ${parts.join('; ')}.`,
+    limitations: [...(r.forecast.minDataMet ? [] : r.forecast.assumptions), ...(data.fxNote ? [data.fxNote] : []), 'Forecasts are estimates from your own history, not guarantees.'],
+    actions: [{ label: 'Review transactions', action: 'open_transactions' }, { label: 'Review bills', action: 'open_bills' }],
+  };
+}
+
 // ---- Registry ---------------------------------------------------------------
 
 export interface ToolDef {
@@ -716,6 +802,13 @@ export const TOOLS: ToolDef[] = [
   },
   { name: 'get_debt_summary', description: 'Number of debts, total balance, total minimum payments and the highest-interest debt.', args: empty, llm: true, run: debtSummary as ToolDef['run'] },
   { name: 'find_possible_duplicates', description: 'Possible duplicate charges in the last 90 days.', args: empty, llm: false, run: possibleDuplicates as ToolDef['run'] },
+  {
+    name: 'get_insights',
+    description: 'What stands out right now: unusual charges, recurring payments, a 30-day cash forecast with a range, spending change vs last month, and months of cash runway.',
+    args: empty,
+    llm: true,
+    run: insightsTool as ToolDef['run'],
+  },
 ];
 
 export const toolByName = (name: string) => TOOLS.find((t) => t.name === name);

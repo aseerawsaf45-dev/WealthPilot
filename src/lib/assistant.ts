@@ -21,10 +21,16 @@ export const SEGMENTS = [
   { id: 'bills', label: 'Bills', examples: ['What bills are due soon?', 'pay Spotify', 'add bill Gym $40 monthly'] },
   { id: 'debts', label: 'Debts', examples: ['Summarise my debts', 'add debt Visa $2,000 at 19.9% APR', 'update debt Visa balance to $1,500'] },
   { id: 'planning', label: 'Planning', examples: ['Compare debt payoff options', 'How are my savings goals doing?', 'open planning'] },
+  { id: 'learn', label: 'Learn', examples: ['What should I learn first?', 'How many months of cash do I have?', 'open learn'] },
   { id: 'import', label: 'Import', examples: ['open import', 'Scan for duplicate charges', 'How much did I spend this month?'] },
   { id: 'settings', label: 'Settings', examples: ['change my currency to BDT', 'turn on reduced motion', 'open settings'] },
 ] as const;
 export type SegmentId = (typeof SEGMENTS)[number]['id'];
+
+/** The assistant segment for an app tab (Copilot has none). */
+export function segmentForTab(tab: string): SegmentId | undefined {
+  return SEGMENTS.find((s) => s.id === tab)?.id;
+}
 export const SEGMENT_IDS = SEGMENTS.map((s) => s.id) as [SegmentId, ...SegmentId[]];
 
 /** "/goals plan my car" → { scope: 'goals', text: 'plan my car' }; anything else → no scope. */

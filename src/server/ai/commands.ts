@@ -50,10 +50,10 @@ const name = z.string().trim().min(1).max(80);
 // ---- Helpers ----------------------------------------------------------------
 
 /** Cents of an amount the user actually wrote; null when the number is not in their message. */
-function centsFromMessage(value: string | number | undefined, message: string): number | null {
+function centsFromMessage(value: string | number | undefined, message: string, currency: string): number | null {
   if (value === undefined) return null;
-  const c = dollarsToCents(String(value).replace(/,/g, ''));
-  const written = (message.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) ?? []).map((n) => dollarsToCents(n));
+  const c = dollarsToCents(String(value).replace(/,/g, ''), currency);
+  const written = (message.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) ?? []).map((n) => dollarsToCents(n, currency));
   return c > 0 && written.includes(c) ? c : null;
 }
 
@@ -106,7 +106,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Record an expense or income the user describes.',
     args: z.object({ amount: needed, merchant: name, type: z.enum(['expense', 'income']).default('expense'), category: name.optional(), date: ymd.optional(), account: name.optional() }),
     resolve: (a: { amount: string; merchant: string; type: 'expense' | 'income'; category?: string; date?: string; account?: string }, { data, message }) => {
-      const c = centsFromMessage(a.amount, message);
+      const c = centsFromMessage(a.amount, message, data.currency);
       if (!c) return noAmount('amount');
       const accounts = data.accounts ?? [];
       const acc = a.account ? findOne(accounts, a.account, 'account') : accounts[0];
@@ -144,7 +144,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Create a savings goal with a target amount and optional deadline; withPlan=true when the user also wants a plan for it.',
     args: z.object({ name, target: needed, targetDate: ymd.optional(), withPlan: z.boolean().optional() }),
     resolve: (a: { name: string; target: string; targetDate?: string; withPlan?: boolean }, { data, message }) => {
-      const c = centsFromMessage(a.target, message);
+      const c = centsFromMessage(a.target, message, data.currency);
       if (!c) return noAmount('target amount');
       if (a.targetDate && a.targetDate <= data.today) return { clarify: `The deadline ${a.targetDate} has already passed. When do you want to reach "${a.name}"?` };
       const created = propose(`Create goal "${a.name}": save ${money(c, data)}${a.targetDate ? ` by ${a.targetDate}` : ''}`, 'addGoal', [
@@ -167,7 +167,7 @@ export const COMMANDS: CommandDef[] = [
       const updates: Record<string, unknown> = {};
       const parts: string[] = [];
       if (a.target !== undefined) {
-        const c = centsFromMessage(a.target, message);
+        const c = centsFromMessage(a.target, message, data.currency);
         if (!c) return noAmount('new target');
         updates.targetCents = c;
         parts.push(`target ${money(c, data)}`);
@@ -189,7 +189,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Add money to a savings goal.',
     args: z.object({ name, amount: needed }),
     resolve: (a: { name: string; amount: string }, { data, message }) => {
-      const c = centsFromMessage(a.amount, message);
+      const c = centsFromMessage(a.amount, message, data.currency);
       if (!c) return noAmount('amount');
       const g = goalBy(data, a.name);
       if (typeof g === 'string') return { clarify: g };
@@ -231,7 +231,7 @@ export const COMMANDS: CommandDef[] = [
     description: "Set this month's budget for a spending category.",
     args: z.object({ category: name, amount: needed }),
     resolve: (a: { category: string; amount: string }, { data, message }) => {
-      const c = centsFromMessage(a.amount, message);
+      const c = centsFromMessage(a.amount, message, data.currency);
       if (!c) return noAmount('budget amount');
       const existing = data.budgets.find((b) => b.category.toLowerCase() === a.category.toLowerCase());
       const category = existing?.category ?? a.category;
@@ -255,7 +255,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Add a recurring bill or subscription.',
     args: z.object({ name, amount: needed, frequency: z.enum(['weekly', 'monthly', 'quarterly', 'annual']).default('monthly'), nextDueDate: ymd.optional() }),
     resolve: (a: { name: string; amount: string; frequency: 'weekly' | 'monthly' | 'quarterly' | 'annual'; nextDueDate?: string }, { data, message }) => {
-      const c = centsFromMessage(a.amount, message);
+      const c = centsFromMessage(a.amount, message, data.currency);
       if (!c) return noAmount('bill amount');
       const due = a.nextDueDate ?? data.today;
       return propose(`Add bill "${a.name}": ${money(c, data)} ${a.frequency}, next due ${due}`, 'addBill', [
@@ -273,7 +273,7 @@ export const COMMANDS: CommandDef[] = [
       const updates: Record<string, unknown> = {};
       const parts: string[] = [];
       if (a.amount !== undefined) {
-        const c = centsFromMessage(a.amount, message);
+        const c = centsFromMessage(a.amount, message, data.currency);
         if (!c) return noAmount('new amount');
         updates.amountCents = c;
         parts.push(`amount ${money(c, data)}`);
@@ -321,9 +321,9 @@ export const COMMANDS: CommandDef[] = [
       kind: z.enum(['credit_card', 'student_loan', 'car_loan', 'mortgage', 'personal_loan']).default('personal_loan'),
     }),
     resolve: (a: { name: string; balance: string; aprPercent?: string; minimumPayment?: string; kind: string }, { data, message }) => {
-      const bal = centsFromMessage(a.balance, message);
+      const bal = centsFromMessage(a.balance, message, data.currency);
       if (!bal) return noAmount('balance');
-      const min = a.minimumPayment !== undefined ? centsFromMessage(a.minimumPayment, message) : 0;
+      const min = a.minimumPayment !== undefined ? centsFromMessage(a.minimumPayment, message, data.currency) : 0;
       if (min === null) return noAmount('minimum payment');
       const apr = a.aprPercent !== undefined ? Number(String(a.aprPercent).replace('%', '')) : 0;
       if (!(apr >= 0 && apr <= 100) || (apr && !message.includes(String(apr)))) return { clarify: 'Please tell me the interest rate (APR) as a percentage, e.g. "19.9%".' };
@@ -343,7 +343,7 @@ export const COMMANDS: CommandDef[] = [
       const parts: string[] = [];
       for (const [key, field, label] of [['balance', 'balanceCents', 'balance'], ['minimumPayment', 'minimumPaymentCents', 'minimum']] as const) {
         if (a[key] === undefined) continue;
-        const c = centsFromMessage(a[key]!, message);
+        const c = centsFromMessage(a[key]!, message, data.currency);
         if (!c) return noAmount(label);
         updates[field] = c;
         parts.push(`${label} ${money(c, data)}`);
@@ -367,7 +367,7 @@ export const COMMANDS: CommandDef[] = [
     description: 'Add a manual account (checking, savings, credit, investment, cash or loan) with an optional current balance.',
     args: z.object({ name, type: z.enum(['checking', 'savings', 'credit', 'investment', 'cash', 'loan']).default('checking'), balance: amount.optional() }),
     resolve: (a: { name: string; type: string; balance?: string }, { data, message }) => {
-      const bal = a.balance !== undefined ? centsFromMessage(a.balance, message) : 0;
+      const bal = a.balance !== undefined ? centsFromMessage(a.balance, message, data.currency) : 0;
       if (bal === null) return noAmount('balance');
       return propose(`Add ${a.type} account "${a.name}" with balance ${money(bal, data)}`, 'addAccount', [
         { name: a.name, institution: 'Manual', type: a.type, currency: data.currency, balanceCents: bal, accountNumberMask: '•••• 0000', isManual: true, isIncludedInNetWorth: true },
@@ -437,19 +437,21 @@ export function resolveCommand(call: ToolCall, data: FinanceData, message: strin
   const rest = Object.fromEntries(Object.entries(args.data as Record<string, unknown>).filter(([k, v]) => k !== field && v !== undefined));
   const pending = field ? { name: call.name, args: rest, field } : undefined;
   const latest = message.split('\n').pop() ?? '';
-  const written = [...new Set(latest.replace(/,/g, '').match(/\d+(?:\.\d{1,2})?/g) ?? [])].slice(0, 4);
+  const written = [...new Set(latest.replace(/,/g, '').match(/\d+(?:\.\d{1,3})?/g) ?? [])].slice(0, 4);
   if (!written.length) return { ...r, pending };
-  const options = written.map((n) => formatMoney(dollarsToCents(n), data.currency));
+  const options = written.map((n) => formatMoney(dollarsToCents(n, data.currency), data.currency));
   return { clarify: `Which ${r.askAmount} should I use: ${options.join(' or ')}? Or type another amount.`, options, pending };
 }
 
 // ---- Rules parser (works without AI) ------------------------------------------
 
-const AMT = String.raw`[$৳€£]?\s?(\d[\d,]*(?:\.\d{1,2})?)`;
+// Any common currency symbol or a 3-letter code before the number; 0–3 decimals (JPY … KWD).
+const SYMBOLS = '$৳€£¥₹₩₦₱₺₫₪₴₽฿₨₵₸₮₭៛';
+const AMT = String.raw`(?:[${SYMBOLS}]|\b[A-Za-z]{3}\s)?\s?(\d[\d,]*(?:\.\d{1,3})?)`;
 
 /** "$30", "make it 30 usd", "about 2,500" → "30" / "2500": a reply that is just one amount. */
 export function singleAmount(message: string): string | null {
-  const m = message.trim().match(/^(?:(?:maybe|may be|make it|use|about|around|say|it's|its)\s+)?[$৳€£]?\s?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:usd|dollars?|bdt|taka|eur|gbp)?[.!]?$/i);
+  const m = message.trim().match(new RegExp(String.raw`^(?:(?:maybe|may be|make it|use|about|around|say|it's|its)\s+)?[${SYMBOLS}]?\s?(\d[\d,]*(?:\.\d{1,3})?)\s*(?:usd|dollars?|bdt|taka|eur|euros?|gbp|pounds?|inr|rupees?|jpy|yen|cny|yuan|[a-z]{3})?[.!]?$`, 'i'));
   return m ? m[1].replace(/,/g, '') : null;
 }
 
@@ -521,7 +523,7 @@ export function parseWhen(text: string, today: string): string | undefined {
 }
 
 const titleCase = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase());
-const STOP = String.raw`(?=\s+(?:which|that|for|by|within|in|next|price|priced|costing|costs?|worth|at|of|around|about|and|with|before|this|so)\b|\s*[,.!?$৳€£]|\s*\d|$)`;
+const STOP = String.raw`(?=\s+(?:which|that|for|by|within|in|next|price|priced|costing|costs?|worth|at|of|around|about|and|with|before|this|so)\b|\s*[,.!?${SYMBOLS}]|\s*\d|$)`;
 
 /** A request for a NEW goal anywhere in the sentence → add_goal (amount/date/name parsed; missing amount is asked later). */
 export function goalRequest(message: string, today: string): ToolCall | null {
@@ -533,7 +535,7 @@ export function goalRequest(message: string, today: string): ToolCall | null {
   else if ((m = t.match(new RegExp(String.raw`\bgoal\s+(?:called|named|for)\s+["“']?(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)["”']?${STOP}`, 'i')))) goalName = m[1];
   else if ((m = t.match(new RegExp(String.raw`\b(?:buy|purchase|afford|get)\s+(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)${STOP}`, 'i')))) goalName = m[1];
   else if ((m = t.match(new RegExp(String.raw`\bsav(?:e|ing)\s+(?:up\s+)?(?:for|towards?)\s+(?:an?\s+|the\s+|my\s+)?([a-z][\w '\-]{0,40}?)${STOP}`, 'i')))) goalName = m[1];
-  const amount = t.match(/[$৳€£]\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s*(?:usd|dollars?|bucks|bdt|taka|tk|eur|euros?|gbp|pounds?)\b/i);
+  const amount = t.match(new RegExp(String.raw`[${SYMBOLS}]\s?(\d[\d,]*(?:\.\d{1,3})?)|(\d[\d,]*(?:\.\d{1,3})?)\s*(?:usd|dollars?|bucks|bdt|taka|tk|eur|euros?|gbp|pounds?|inr|rupees?|rs|jpy|yen|cny|rmb|yuan|aed|dirhams?|sar|riyals?)\b`, 'i'));
   const targetDate = parseWhen(t, today);
   const args: Record<string, unknown> = { name: titleCase(goalName ?? 'New goal') };
   if (amount) args.target = (amount[1] ?? amount[2]).replace(/,/g, '');
@@ -567,14 +569,15 @@ const DEBT_CMDS = ['add_debt', 'update_debt', 'delete_debt'];
 
 /** What each segment offers the model (navigate is always allowed) and the calculation its overview shows. */
 export const SEGMENT_TOOLS: Record<SegmentId, { read: string[]; commands: string[]; overview?: (today: string) => ToolCall }> = {
-  overview: { read: ['get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: COMMANDS.map((c) => c.name), overview: monthToDate },
-  transactions: { read: ['get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: ['add_transaction', 'recategorize_transaction', 'delete_transaction', 'open_quick_add'], overview: monthToDate },
-  accounts: { read: ['get_financial_summary'], commands: ['add_account', 'rename_account', 'delete_account'] },
+  overview: { read: ['get_insights', 'get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: COMMANDS.map((c) => c.name), overview: monthToDate },
+  transactions: { read: ['get_insights', 'get_financial_summary', 'get_category_breakdown', 'compare_periods', 'find_possible_duplicates'], commands: ['add_transaction', 'recategorize_transaction', 'delete_transaction', 'open_quick_add'], overview: monthToDate },
+  accounts: { read: ['get_insights', 'get_financial_summary'], commands: ['add_account', 'rename_account', 'delete_account'], overview: () => ({ name: 'get_insights', args: {} }) },
   budgets: { read: ['get_budget_status', 'get_category_breakdown'], commands: ['set_budget', 'delete_budget'], overview: (t) => ({ name: 'get_budget_status', args: { month: t.slice(0, 7) } }) },
   goals: { read: ['calculate_savings_plan', 'plan_goal'], commands: GOAL_CMDS, overview: () => ({ name: 'calculate_savings_plan', args: {} }) },
-  bills: { read: ['get_upcoming_bills'], commands: ['add_bill', 'update_bill', 'pay_bill', 'delete_bill'], overview: () => ({ name: 'get_upcoming_bills', args: { days: 30 } }) },
+  bills: { read: ['get_upcoming_bills', 'get_insights'], commands: ['add_bill', 'update_bill', 'pay_bill', 'delete_bill'], overview: () => ({ name: 'get_upcoming_bills', args: { days: 30 } }) },
   debts: { read: ['get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'get_debt_summary', args: {} }) },
   planning: { read: ['get_debt_summary', 'calculate_savings_plan', 'plan_goal'], commands: [...DEBT_CMDS, ...GOAL_CMDS], overview: () => ({ name: 'get_debt_summary', args: {} }) },
-  import: { read: ['get_financial_summary'], commands: ['open_quick_add'] },
+  learn: { read: ['get_insights', 'get_debt_summary', 'calculate_savings_plan'], commands: ['navigate'], overview: () => ({ name: 'get_insights', args: {} }) },
+  import: { read: ['get_financial_summary', 'find_possible_duplicates'], commands: ['open_quick_add'] },
   settings: { read: [], commands: ['update_preferences'] },
 };
