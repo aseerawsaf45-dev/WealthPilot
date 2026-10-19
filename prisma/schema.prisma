@@ -394,6 +394,8 @@ model InvestmentPlan {
   expectedReturnBps Int? // user override; null = derived from country data + risk profile
   taxBps            Int      @default(0) // tax on gains
   scenarios         String[] @default([])
+  allocation        Json? // [{ symbol, label, weightPct }] summing to 100: the chosen fund mix
+  mixName           String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

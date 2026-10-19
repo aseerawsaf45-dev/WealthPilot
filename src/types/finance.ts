@@ -192,6 +192,7 @@ export const ASSISTANT_OPS = [
   'addDebt', 'updateDebt', 'deleteDebt',
   'addAccount', 'updateAccount', 'removeAccount',
   'setPreferences',
+  'saveInvestmentPlan', 'deleteInvestmentPlan', 'saveLoanOffer', 'deleteLoanOffer', 'takeLoan',
 ] as const;
 export type AssistantOp = (typeof ASSISTANT_OPS)[number];
 
@@ -262,6 +263,9 @@ export interface InvestmentPlan {
   expectedReturnBps: number | null;
   taxBps: number;
   scenarios: string[];
+  /** Chosen fund mix (weights add up to 100), or null. */
+  allocation: Array<{ symbol: string; label: string; weightPct: number }> | null;
+  mixName: string | null;
   updatedAt: string;
 }
 

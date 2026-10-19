@@ -8,7 +8,7 @@ export const GOAL_INTENT =
 /** Imperative messages ("add…", "pay…", "delete…") are assistant commands, not questions. Shared by server and the demo chat. */
 export function looksLikeCommand(message: string): boolean {
   if (GOAL_INTENT.test(message)) return true;
-  return /^(?:please\s+|(?:i(?:\s+(?:want|need|would like)|'d like)|let's|can you|could you|help me)\s+(?:to\s+)?)?(?:add|create|new|set|change|update|rename|edit|delete|remove|pay|pause|resume|record|log|contribute|put|move|switch|turn|mark|open|go to|take me|plan)\b/i.test(message.trim());
+  return /^(?:please\s+|(?:i(?:\s+(?:want|need|would like)|'d like)|let's|can you|could you|help me)\s+(?:to\s+)?)?(?:add|create|new|set|change|update|rename|edit|delete|remove|pay|pause|resume|record|log|contribute|put|move|switch|turn|mark|open|go to|take|apply|accept|plan)\b/i.test(message.trim());
 }
 
 /** App segments the user can address with "/goals …" in the assistant chat. */

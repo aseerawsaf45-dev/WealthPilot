@@ -11,6 +11,9 @@
 import { z } from 'zod';
 import { formatMoney, dollarsToCents } from '@/lib/money';
 import { ymd, Currency } from '../schemas';
+import { isCountryCode } from '@/lib/countries';
+import { SCENARIOS, SCENARIO_IDS, type ScenarioId } from '@/lib/planning/scenarios';
+import { suggestMixes, MIX_IDS, type MixId } from '@/lib/planning/markets';
 import { addMonthsYmd, type FinanceData } from './tools';
 import type { ToolCall } from './router';
 import type { ActionProposal } from '@/types/finance';
@@ -58,6 +61,28 @@ function centsFromMessage(value: string | number | undefined, message: string, c
 }
 
 const noAmount = (what: string): Resolved => ({ clarify: `Please tell me the ${what} as a number, e.g. "$25".`, askAmount: what });
+
+/** Scenario id from everyday words ("war", "sanctions", "oil shock", …). */
+function scenarioFrom(text: string): ScenarioId | null {
+  const t = text.toLowerCase();
+  if (/war|conflict/.test(t)) return 'conflict';
+  if (/sanction|capital control/.test(t)) return 'sanctions';
+  if (/oil|energy/.test(t)) return 'oil_shock';
+  if (/rate|hike/.test(t)) return 'rate_hike';
+  if (/currency|devaluation|taka|crash/.test(t)) return 'currency_crash';
+  if (/election|politic|unrest|instab/.test(t)) return 'political_instability';
+  if (/recession|downturn|crisis/.test(t)) return 'recession';
+  return null;
+}
+
+/** A loan offer by name or lender (taken offers excluded unless allowTaken is false-y for listing). */
+function findOffer(data: FinanceData, query: string, onlyConsidering = false) {
+  const offers = (data.loanOffers ?? []).filter((o) => !onlyConsidering || o.status === 'considering');
+  const q = query.trim().toLowerCase().replace(/\s+loan(\s+offer)?$/, '');
+  const byLender = offers.filter((o) => o.lender.toLowerCase().includes(q) || q.includes(o.lender.toLowerCase()));
+  if (byLender.length === 1) return byLender[0];
+  return findOne(offers.map((o) => ({ ...o, name: o.name })), query, onlyConsidering ? 'loan offer you are considering' : 'loan offer');
+}
 
 function findOne<T extends { name: string; id?: string }>(items: T[], query: string, kind: string): T | string {
   const q = query.trim().toLowerCase();
@@ -394,6 +419,187 @@ export const COMMANDS: CommandDef[] = [
       return propose(`Delete account "${acc.name}"`, 'removeAccount', [acc.id], true);
     },
   },
+  // ---- Planner: investment plans, mixes, stress tests, loan offers ----------------------------
+  {
+    name: 'add_investment_plan',
+    description: 'Create an investment plan: name, monthly amount, optional starting amount, years, risk (conservative/balanced/growth) and country (ISO-2).',
+    args: z.object({ name, monthly: needed, initial: amount.optional(), years: z.union([z.number(), z.string()]).optional(), risk: z.enum(['conservative', 'balanced', 'growth']).default('balanced'), country: z.string().length(2).optional() }),
+    resolve: (a: { name: string; monthly: string; initial?: string; years?: string | number; risk: 'conservative' | 'balanced' | 'growth'; country?: string }, { data, message }) => {
+      const monthly = centsFromMessage(a.monthly, message, data.currency);
+      if (!monthly) return noAmount('monthly amount');
+      const initial = a.initial !== undefined ? centsFromMessage(a.initial, message, data.currency) : 0;
+      if (initial === null) return noAmount('starting amount');
+      const years = Math.min(50, Math.max(1, Math.round(Number(a.years) || 10)));
+      const country = (a.country ?? data.region ?? 'US').toUpperCase();
+      return propose(`Create investment plan "${a.name}": ${money(initial, data)} now + ${money(monthly, data)}/month for ${years} years, ${a.risk}, in ${country}`, 'saveInvestmentPlan', [
+        { name: a.name, country: isCountryCode(country) ? country : 'US', currency: data.currency, initialCents: initial, monthlyCents: monthly, horizonMonths: years * 12, riskProfile: a.risk, expectedReturnBps: null, taxBps: 0, scenarios: [], allocation: null, mixName: null },
+      ]);
+    },
+  },
+  {
+    name: 'update_investment_plan',
+    description: 'Change an investment plan: monthly amount, starting amount, years, risk, country or expected yearly return (%).',
+    args: z.object({ name, monthly: amount.optional(), initial: amount.optional(), years: z.union([z.number(), z.string()]).optional(), risk: z.enum(['conservative', 'balanced', 'growth']).optional(), country: z.string().length(2).optional(), expectedReturnPercent: z.union([z.number(), z.string()]).optional() }),
+    resolve: (a: { name: string; monthly?: string; initial?: string; years?: string | number; risk?: 'conservative' | 'balanced' | 'growth'; country?: string; expectedReturnPercent?: string | number }, { data, message }) => {
+      const plan = findOne(data.investments ?? [], a.name, 'investment plan');
+      if (typeof plan === 'string') return { clarify: plan };
+      const next = { ...plan };
+      const changes: string[] = [];
+      if (a.monthly !== undefined) {
+        const c = centsFromMessage(a.monthly, message, data.currency);
+        if (!c) return noAmount('monthly amount');
+        next.monthlyCents = c;
+        changes.push(`${money(c, data)}/month`);
+      }
+      if (a.initial !== undefined) {
+        const c = centsFromMessage(a.initial, message, data.currency);
+        if (c === null) return noAmount('starting amount');
+        next.initialCents = c;
+        changes.push(`start with ${money(c, data)}`);
+      }
+      if (a.years !== undefined && Number(a.years) > 0) {
+        next.horizonMonths = Math.min(600, Math.round(Number(a.years) * 12));
+        changes.push(`${Math.round(next.horizonMonths / 12)} years`);
+      }
+      if (a.risk) {
+        next.riskProfile = a.risk;
+        changes.push(a.risk);
+      }
+      if (a.country && isCountryCode(a.country.toUpperCase())) {
+        next.country = a.country.toUpperCase();
+        changes.push(`invest in ${next.country}`);
+      }
+      if (a.expectedReturnPercent !== undefined) {
+        const r = Number(String(a.expectedReturnPercent).replace('%', ''));
+        if (!Number.isFinite(r) || !message.includes(String(a.expectedReturnPercent).replace('%', ''))) return { clarify: 'Please tell me the expected yearly return as a percentage, e.g. "7%".' };
+        next.expectedReturnBps = Math.round(r * 100);
+        changes.push(`expected return ${r}%`);
+      }
+      if (!changes.length) return { clarify: 'What should I change: the monthly amount, years, risk, country or expected return?' };
+      const { id, updatedAt: _u, ...body } = next;
+      return propose(`Update plan "${plan.name}": ${changes.join(', ')}`, 'saveInvestmentPlan', [body, id]);
+    },
+  },
+  {
+    name: 'delete_investment_plan',
+    description: 'Delete an investment plan.',
+    args: z.object({ name }),
+    resolve: (a: { name: string }, { data }) => {
+      const plan = findOne(data.investments ?? [], a.name, 'investment plan');
+      if (typeof plan === 'string') return { clarify: plan };
+      return propose(`Delete investment plan "${plan.name}"`, 'deleteInvestmentPlan', [plan.id], true);
+    },
+  },
+  {
+    name: 'set_investment_scenario',
+    description: 'Turn a stress-test scenario on or off for an investment plan: conflict (war), sanctions, oil_shock, rate_hike, currency_crash, political_instability, recession.',
+    args: z.object({ name, scenario: z.enum(SCENARIO_IDS), on: z.boolean().default(true) }),
+    resolve: (a: { name: string; scenario: ScenarioId; on: boolean }, { data }) => {
+      const plan = findOne(data.investments ?? [], a.name, 'investment plan');
+      if (typeof plan === 'string') return { clarify: plan };
+      const label = SCENARIOS.find((s) => s.id === a.scenario)!.label;
+      const scenarios = a.on ? [...new Set([...plan.scenarios, a.scenario])] : plan.scenarios.filter((s) => s !== a.scenario);
+      const { id, updatedAt: _u, ...body } = plan;
+      return propose(`${a.on ? 'Turn on' : 'Turn off'} the "${label}" stress test for "${plan.name}"`, 'saveInvestmentPlan', [{ ...body, scenarios }, id]);
+    },
+  },
+  {
+    name: 'apply_investment_mix',
+    description: 'Apply one of the history-based fund mixes to an investment plan: core, global, lower_swings, growth or resilient.',
+    args: z.object({ name, mix: z.enum(MIX_IDS) }),
+    resolve: (a: { name: string; mix: MixId }, { data }) => {
+      const plan = findOne(data.investments ?? [], a.name, 'investment plan');
+      if (typeof plan === 'string') return { clarify: plan };
+      if (!data.markets?.length) return { clarify: 'Market data is unavailable right now, so I cannot build the mix. Try again in a few minutes.' };
+      const mixes = suggestMixes(data.markets, plan.riskProfile, Math.max(1, Math.round(plan.horizonMonths / 12)));
+      const mix = mixes.find((m) => m.id === a.mix);
+      if (!mix) return { clarify: `The available mixes are: ${mixes.map((m) => m.name).join(', ')}.` };
+      const allocation = mix.picks.map((p) => ({ symbol: p.symbol, label: p.label, weightPct: p.weightPct }));
+      const { id, updatedAt: _u, ...body } = plan;
+      return propose(
+        `Apply the "${mix.name}" mix to "${plan.name}": ${allocation.map((x) => `${x.label} ${x.weightPct}%`).join(', ')} (history-based return ${((mix.expectedReturnBps ?? 0) / 100).toFixed(1)}%/yr)`,
+        'saveInvestmentPlan',
+        [{ ...body, allocation, mixName: mix.name, expectedReturnBps: mix.expectedReturnBps }, id]
+      );
+    },
+  },
+  {
+    name: 'add_loan_offer',
+    description: 'Save a loan offer to compare: name, lender, amount, APR %, term in months or years, optional upfront fee and purpose (personal/car/home/education/business).',
+    args: z.object({ name: name.optional(), lender: name, amount: needed, aprPercent: z.union([z.string(), z.number()]).optional(), months: z.union([z.number(), z.string()]).optional(), years: z.union([z.number(), z.string()]).optional(), fee: amount.optional(), purpose: z.enum(['personal', 'car', 'home', 'education', 'business']).default('personal') }),
+    resolve: (a: { name?: string; lender: string; amount: string; aprPercent?: string | number; months?: string | number; years?: string | number; fee?: string; purpose: 'personal' | 'car' | 'home' | 'education' | 'business' }, { data, message }) => {
+      const principal = centsFromMessage(a.amount, message, data.currency);
+      if (!principal) return noAmount('loan amount');
+      const apr = a.aprPercent !== undefined ? Number(String(a.aprPercent).replace('%', '')) : NaN;
+      if (!(apr >= 0 && apr <= 100) || !message.includes(String(a.aprPercent).replace('%', ''))) return { clarify: 'What is the interest rate (APR)? For example "11.5%".' };
+      const months = Math.round(Number(a.months) || Number(a.years) * 12 || 0);
+      if (!(months >= 1 && months <= 480)) return { clarify: 'For how long is the loan? For example "5 years" or "60 months".' };
+      const fee = a.fee !== undefined ? centsFromMessage(a.fee, message, data.currency) : 0;
+      if (fee === null) return noAmount('fee');
+      const label = a.name ?? `${a.purpose[0].toUpperCase()}${a.purpose.slice(1)} loan`;
+      return propose(`Save loan offer "${label}" from ${a.lender}: ${money(principal, data)} at ${apr}% for ${months} months${fee ? `, ${money(fee, data)} fees` : ''}`, 'saveLoanOffer', [
+        { name: label, lender: a.lender, principalCents: principal, aprBps: Math.round(apr * 100), termMonths: months, feeCents: fee, purpose: a.purpose, country: data.region && data.region !== 'EU' ? data.region : null },
+      ]);
+    },
+  },
+  {
+    name: 'update_loan_offer',
+    description: 'Change a loan offer that has not been taken yet: amount, APR %, term (months) or fee.',
+    args: z.object({ name, amount: amount.optional(), aprPercent: z.union([z.string(), z.number()]).optional(), months: z.union([z.number(), z.string()]).optional(), fee: amount.optional() }),
+    resolve: (a: { name: string; amount?: string; aprPercent?: string | number; months?: string | number; fee?: string }, { data, message }) => {
+      const offer = findOffer(data, a.name);
+      if (typeof offer === 'string') return { clarify: offer };
+      if (offer.status === 'taken') return { clarify: `"${offer.name}" was already taken; change it in your debts instead.` };
+      const next = { ...offer };
+      const changes: string[] = [];
+      if (a.amount !== undefined) {
+        const c = centsFromMessage(a.amount, message, data.currency);
+        if (!c) return noAmount('loan amount');
+        next.principalCents = c;
+        changes.push(money(c, data));
+      }
+      if (a.aprPercent !== undefined) {
+        const apr = Number(String(a.aprPercent).replace('%', ''));
+        if (!(apr >= 0 && apr <= 100) || !message.includes(String(a.aprPercent).replace('%', ''))) return { clarify: 'What is the new interest rate (APR)?' };
+        next.aprBps = Math.round(apr * 100);
+        changes.push(`${apr}% APR`);
+      }
+      if (a.months !== undefined && Number(a.months) >= 1) {
+        next.termMonths = Math.min(480, Math.round(Number(a.months)));
+        changes.push(`${next.termMonths} months`);
+      }
+      if (a.fee !== undefined) {
+        const c = centsFromMessage(a.fee, message, data.currency);
+        if (c === null) return noAmount('fee');
+        next.feeCents = c;
+        changes.push(`${money(c, data)} fees`);
+      }
+      if (!changes.length) return { clarify: 'What should I change: the amount, rate, term or fee?' };
+      const { id, updatedAt: _u, status: _s, debtId: _d, ...body } = next;
+      return propose(`Update loan offer "${offer.name}" (${offer.lender}): ${changes.join(', ')}`, 'saveLoanOffer', [body, id]);
+    },
+  },
+  {
+    name: 'delete_loan_offer',
+    description: 'Delete a saved loan offer.',
+    args: z.object({ name }),
+    resolve: (a: { name: string }, { data }) => {
+      const offer = findOffer(data, a.name);
+      if (typeof offer === 'string') return { clarify: offer };
+      return propose(`Delete loan offer "${offer.name}" from ${offer.lender}`, 'deleteLoanOffer', [offer.id], true);
+    },
+  },
+  {
+    name: 'take_loan',
+    description: 'The user took one of their saved loan offers (by offer name or lender): add it to their debts.',
+    args: z.object({ name, dueDay: z.union([z.number(), z.string()]).optional() }),
+    resolve: (a: { name: string; dueDay?: string | number }, { data }) => {
+      const offer = findOffer(data, a.name, true);
+      if (typeof offer === 'string') return { clarify: offer };
+      const day = Math.min(28, Math.max(1, Math.round(Number(a.dueDay) || Number(data.today.slice(8, 10)) || 1)));
+      return propose(`Add "${offer.name}" from ${offer.lender} to your debts (${money(offer.principalCents, data)} at ${offer.aprBps / 100}%, payment due on day ${day})`, 'takeLoan', [offer.id, day]);
+    },
+  },
   {
     name: 'update_preferences',
     description: 'Change app settings: display currency or reduced motion. (AI consent, sign-out and account deletion are not available here.)',
@@ -470,6 +676,18 @@ export function rulesCommand(message: string): ToolCall | null {
   if ((r = m.match(/^pay\s+(?:the\s+|my\s+)?(.+?)(?:\s+bill)?$/i))) return { name: 'pay_bill', args: { name: r[1] } };
   if ((r = m.match(/^plan\s+(?:for\s+)?(?:my\s+|the\s+)?(.+?)(?:\s+goal)?$/i))) return { name: 'plan_goal', args: { name: r[1] } };
   if ((r = m.match(/^(pause|resume)\s+(?:the\s+|my\s+)?(.+?)(?:\s+goal)?$/i))) return { name: `${r[1].toLowerCase()}_goal`, args: { name: r[2] } };
+  // Planner (debt & wealth): loans, investment mixes and stress tests.
+  if ((r = m.match(/^(?:i\s+)?(?:take|took|accept(?:ed)?|go with|went with)\s+(?:the\s+|my\s+)?(.+?)\s+loan(?:\s+offer)?(?:\s+due\s+(?:on\s+)?(?:day\s+)?(\d{1,2}))?$/i))) return { name: 'take_loan', args: { name: r[1], ...(r[2] && { dueDay: r[2] }) } };
+  if ((r = m.match(/^(?:apply|use|switch to)\s+(?:the\s+)?(core|simple global|global|lower[- ]swings?|growth(?:[- ]tilt)?|crisis[- ]resilient|resilient)\s+mix\s+(?:to|for|on|in)\s+(?:my\s+|the\s+)?(.+?)(?:\s+(?:investment\s+)?plan)?$/i))) {
+    const mix = /lower/i.test(r[1]) ? 'lower_swings' : /growth/i.test(r[1]) ? 'growth' : /resilient/i.test(r[1]) ? 'resilient' : /global/i.test(r[1]) ? 'global' : 'core';
+    return { name: 'apply_investment_mix', args: { name: r[2], mix } };
+  }
+  if ((r = m.match(/^turn\s+(on|off)\s+(?:the\s+)?(.+?)\s+(?:scenario|stress[- ]test)\s+(?:for|on|in)\s+(?:my\s+|the\s+)?(.+?)(?:\s+(?:investment\s+)?plan)?$/i))) {
+    const scenario = scenarioFrom(r[2]);
+    if (scenario) return { name: 'set_investment_scenario', args: { name: r[3], scenario, on: r[1].toLowerCase() === 'on' } };
+  }
+  if ((r = m.match(/^(?:delete|remove)\s+(?:the\s+|my\s+)?(.+?)\s+(?:investment\s+)?plan$/i))) return { name: 'delete_investment_plan', args: { name: r[1] } };
+  if ((r = m.match(/^(?:delete|remove)\s+(?:the\s+|my\s+)?(.+?)\s+loan\s+offer$/i))) return { name: 'delete_loan_offer', args: { name: r[1] } };
   // Natural phrasings ("I bought…", "set a budget of $300 for dining", "add my Netflix subscription $15 monthly").
   const P = String.raw`^(?:please\s+|(?:i(?:\s+(?:want|need|would like)|'d like)|can you|could you|help me)\s+(?:to\s+)?)?`;
   if ((r = m.match(new RegExp(String.raw`^(?:i\s+)?(?:bought|purchased|got)\s+(?:an?\s+|some\s+|the\s+)?(.+?)\s+(?:for|at)\s+${AMT}(?:\s*(?:usd|dollars?|bdt|taka|tk))?$`, 'i'))))
@@ -576,9 +794,9 @@ export const SEGMENT_TOOLS: Record<SegmentId, { read: string[]; commands: string
   goals: { read: ['calculate_savings_plan', 'plan_goal'], commands: GOAL_CMDS, overview: () => ({ name: 'calculate_savings_plan', args: {} }) },
   bills: { read: ['get_upcoming_bills', 'get_insights'], commands: ['add_bill', 'update_bill', 'pay_bill', 'delete_bill'], overview: () => ({ name: 'get_upcoming_bills', args: { days: 30 } }) },
   debts: { read: ['get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'get_debt_summary', args: {} }) },
-  planning: { read: ['get_debt_summary', 'compare_loans', 'get_investment_outlook', 'calculate_savings_plan'], commands: [...DEBT_CMDS, ...GOAL_CMDS], overview: () => ({ name: 'get_debt_summary', args: {} }) },
-  loans: { read: ['compare_loans', 'get_debt_summary'], commands: DEBT_CMDS, overview: () => ({ name: 'compare_loans', args: {} }) },
-  invest: { read: ['get_investment_outlook', 'get_debt_summary'], commands: ['navigate'], overview: () => ({ name: 'get_investment_outlook', args: {} }) },
+  planning: { read: ['get_debt_summary', 'compare_loans', 'get_investment_outlook', 'calculate_savings_plan'], commands: [...DEBT_CMDS, ...GOAL_CMDS, 'add_investment_plan', 'update_investment_plan', 'delete_investment_plan', 'set_investment_scenario', 'apply_investment_mix', 'add_loan_offer', 'update_loan_offer', 'delete_loan_offer', 'take_loan'], overview: () => ({ name: 'get_debt_summary', args: {} }) },
+  loans: { read: ['compare_loans', 'get_debt_summary'], commands: [...DEBT_CMDS, 'add_loan_offer', 'update_loan_offer', 'delete_loan_offer', 'take_loan'], overview: () => ({ name: 'compare_loans', args: {} }) },
+  invest: { read: ['get_investment_outlook', 'get_debt_summary'], commands: ['navigate', 'add_investment_plan', 'update_investment_plan', 'delete_investment_plan', 'set_investment_scenario', 'apply_investment_mix'], overview: () => ({ name: 'get_investment_outlook', args: {} }) },
   learn: { read: ['get_insights', 'get_debt_summary', 'calculate_savings_plan'], commands: ['navigate'], overview: () => ({ name: 'get_insights', args: {} }) },
   import: { read: ['get_financial_summary', 'find_possible_duplicates'], commands: ['open_quick_add'] },
   settings: { read: [], commands: ['update_preferences'] },

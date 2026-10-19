@@ -1301,3 +1301,61 @@ describe('GDELT parsing (real response shape)', async () => {
     assert.ok(brac.signal > 0 && sc.articles.length === 1);
   });
 });
+
+describe('Several history-based mixes', async () => {
+  const M = await import('../src/lib/planning/markets.ts');
+  const mk = (symbol: string, r: number, vol: number, r1: number, dd = -2000) => ({ ...M.UNIVERSE.find((u) => u.symbol === symbol)!, lastPrice: 1, lastTime: null, currency: 'USD', return1yBps: r1, return3yBps: r, return5yBps: r, return10yBps: r, volatilityBps: vol, maxDrawdownBps: dd, history: [] });
+  const stats = [mk('ACWI', 900, 1500, 1000), mk('SPY', 1300, 1550, 1100), mk('EWJ', 800, 1300, 1500), mk('INDA', 1100, 2000, 900, -4500), mk('BNDX', 150, 400, 100, -1500), mk('GLD', 700, 1500, 300), mk('BIL', 200, 50, 400, -10)];
+  it('returns 5 distinct mixes that each add up to exactly 100%', () => {
+    const mixes = M.suggestMixes(stats, 'balanced', 10);
+    assert.deepStrictEqual(mixes.map((m) => m.id), ['core', 'global', 'lower_swings', 'growth', 'resilient']);
+    for (const m of mixes) assert.strictEqual(m.picks.reduce((s, p) => s + p.weightPct, 0), 100);
+    const by = Object.fromEntries(mixes.map((m) => [m.id, m]));
+    assert.ok(by.growth.expectedReturnBps! > by.lower_swings.expectedReturnBps!);
+    assert.ok(by.lower_swings.volatilityBps! < by.growth.volatilityBps!);
+    assert.ok(by.global.picks.length <= 3 && !by.global.picks.some((p) => p.symbol === 'GLD'));
+    assert.strictEqual(mixes.filter((m) => m.suggested).length, 1);
+  });
+  it('marks the crisis-resilient mix as suggested for unstable countries', () => {
+    const mixes = M.suggestMixes(stats, 'balanced', 10, { lowStability: true });
+    assert.strictEqual(mixes.find((m) => m.suggested)!.id, 'resilient');
+  });
+  it('scores any edited allocation', () => {
+    const s = M.mixStats([{ symbol: 'SPY', label: 'x', weightPct: 50 }, { symbol: 'BNDX', label: 'y', weightPct: 50 }], stats);
+    assert.deepStrictEqual([s.expectedReturnBps, s.volatilityBps], [725, 975]);
+  });
+});
+
+describe('Copilot control of the Planner', async () => {
+  const C = await import('../src/server/ai/commands.ts');
+  const S = await import('../src/server/schemas.ts');
+  const M = await import('../src/lib/planning/markets.ts');
+  const mk = (symbol: string, r: number, vol: number) => ({ ...M.UNIVERSE.find((u) => u.symbol === symbol)!, lastPrice: 1, lastTime: null, currency: 'USD', return1yBps: r, return3yBps: r, return5yBps: r, return10yBps: r, volatilityBps: vol, maxDrawdownBps: -2000, history: [] });
+  const plan = { id: 'ip1', name: 'Kids education', country: 'BD', currency: 'BDT', initialCents: 0, monthlyCents: 500000, horizonMonths: 120, riskProfile: 'balanced', expectedReturnBps: null, taxBps: 0, scenarios: [], allocation: null, mixName: null, updatedAt: '2026-10-01' };
+  const offer = { id: 'lo1', name: 'Car loan', lender: 'Sonali Bank', principalCents: 50000000, aprBps: 1100, termMonths: 60, feeCents: 0, purpose: 'car', country: 'BD', status: 'considering', debtId: null, updatedAt: '2026-10-01' };
+  const data = { currency: 'BDT', today: '2026-10-20', transactions: [], budgets: [], goals: [], bills: [], debts: [], accounts: [], investments: [plan], loanOffers: [offer], markets: [mk('ACWI', 900, 1500), mk('SPY', 1300, 1550), mk('BNDX', 150, 400), mk('GLD', 700, 1500), mk('BIL', 200, 50)] } as never;
+
+  it('rejects allocations that do not add up to 100% or use unknown funds', () => {
+    const base = { name: 'P', country: 'BD', currency: 'BDT', initialCents: 0, monthlyCents: 1, horizonMonths: 12, riskProfile: 'balanced' };
+    assert.ok(S.InvestmentPlanInput.safeParse({ ...base, allocation: [{ symbol: 'SPY', label: 'S', weightPct: 60 }, { symbol: 'AGG', label: 'A', weightPct: 40 }] }).success);
+    assert.ok(!S.InvestmentPlanInput.safeParse({ ...base, allocation: [{ symbol: 'SPY', label: 'S', weightPct: 60 }, { symbol: 'AGG', label: 'A', weightPct: 30 }] }).success);
+    assert.ok(!S.InvestmentPlanInput.safeParse({ ...base, allocation: [{ symbol: 'TSLA', label: 'T', weightPct: 100 }] }).success);
+  });
+  it('parses planner phrasings without AI', () => {
+    assert.deepStrictEqual(C.rulesCommand('take the Sonali Bank loan'), { name: 'take_loan', args: { name: 'Sonali Bank' } });
+    assert.deepStrictEqual(C.rulesCommand('apply the lower swings mix to Kids education'), { name: 'apply_investment_mix', args: { name: 'Kids education', mix: 'lower_swings' } });
+    assert.deepStrictEqual(C.rulesCommand('turn on the war scenario for Kids education plan'), { name: 'set_investment_scenario', args: { name: 'Kids education', scenario: 'conflict', on: true } });
+    assert.deepStrictEqual(C.rulesCommand('delete the Car loan offer'), { name: 'delete_loan_offer', args: { name: 'Car' } });
+  });
+  it('resolves to proposals with ids from the user data and asks instead of guessing', () => {
+    const take = C.resolveCommand({ name: 'take_loan', args: { name: 'Sonali Bank' } }, data, 'take the Sonali Bank loan');
+    assert.ok('proposal' in take && take.proposal.op === 'takeLoan' && take.proposal.args[0] === 'lo1' && take.proposal.args[1] === 20);
+    const mix = C.resolveCommand({ name: 'apply_investment_mix', args: { name: 'kids', mix: 'growth' } }, data, 'apply the growth mix to kids');
+    assert.ok('proposal' in mix && mix.proposal.op === 'saveInvestmentPlan' && mix.proposal.args[1] === 'ip1');
+    const body = (mix as { proposal: { args: [{ allocation: Array<{ weightPct: number }>; mixName: string }] } }).proposal.args[0];
+    assert.strictEqual(body.allocation.reduce((s, x) => s + x.weightPct, 0), 100);
+    assert.ok(S.InvestmentPlanInput.safeParse(body).success, 'the proposal passes the API schema');
+    assert.ok('clarify' in C.resolveCommand({ name: 'apply_investment_mix', args: { name: 'Retirement', mix: 'core' } }, data, 'apply the core mix to Retirement'));
+    assert.ok('clarify' in C.resolveCommand({ name: 'update_investment_plan', args: { name: 'Kids education', monthly: '9000' } }, data, 'invest more in kids education'), 'an amount the user never wrote is rejected');
+  });
+});

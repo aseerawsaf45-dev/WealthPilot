@@ -9,6 +9,7 @@ import { scanAndEnforcePciDssScope } from '@/lib/compliance/pciDssCompliance';
 import { isIsoCurrency } from '@/lib/currency';
 import { isCountryCode } from '@/lib/countries';
 import { SCENARIO_IDS } from '@/lib/planning/scenarios';
+import { UNIVERSE } from '@/lib/planning/markets';
 
 export const money = z.number().int().safe();
 const nonNegMoney = money.nonnegative();
@@ -236,6 +237,14 @@ export const PasswordConfirm = z.object({ password: z.string().min(1).max(128) }
 // ---- Wealth planner (rates in basis points: 1% = 100) ------------------------
 const bps = z.number().int().min(0).max(10_000);
 const country = z.string().trim().toUpperCase().refine(isCountryCode, 'Unknown country');
+const FUND_SYMBOLS = UNIVERSE.map((u) => u.symbol) as [string, ...string[]];
+/** A fund mix: known funds only, whole-percent weights adding up to exactly 100. */
+export const Allocation = z
+  .array(z.object({ symbol: z.enum(FUND_SYMBOLS), label: z.string().trim().min(1).max(60), weightPct: z.number().int().min(0).max(100) }))
+  .min(1)
+  .max(10)
+  .refine((a) => a.reduce((s, x) => s + x.weightPct, 0) === 100, 'Fund weights must add up to 100%')
+  .refine((a) => new Set(a.map((x) => x.symbol)).size === a.length, 'Each fund can appear only once');
 export const InvestmentPlanInput = z.object({
   name: text(80),
   country,
@@ -247,6 +256,8 @@ export const InvestmentPlanInput = z.object({
   expectedReturnBps: z.number().int().min(-5_000).max(5_000).nullable().default(null),
   taxBps: bps.default(0),
   scenarios: z.array(z.enum(SCENARIO_IDS)).max(SCENARIO_IDS.length).default([]),
+  allocation: Allocation.nullable().default(null),
+  mixName: z.string().trim().max(60).nullable().default(null),
 });
 export const InvestmentPlanPatch = InvestmentPlanInput.partial();
 

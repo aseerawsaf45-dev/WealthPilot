@@ -265,6 +265,7 @@ export function CopilotTab({ onNavigate, onOpenQuickAdd, compact = false, onClos
           else if (r.success === false) error = r.conflict ?? 'That change could not be saved.';
         }
         if (!error && p.op === 'planGoal') onNavigate?.('goals');
+        if (!error && ['saveInvestmentPlan', 'deleteInvestmentPlan', 'saveLoanOffer', 'deleteLoanOffer', 'takeLoan'].includes(p.op)) onNavigate?.('planning');
       }
     } catch (e) {
       error = e instanceof Error ? e.message : 'That change could not be saved.';

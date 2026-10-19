@@ -14,6 +14,7 @@ import { RowActions } from '../RowActions';
 import { CountryCard, useCountryMacro } from './CountryCard';
 import { LineChart } from './LineChart';
 import { MarketsCard } from './MarketsCard';
+import { MixEditor } from './MixEditor';
 import { BanksCard } from './BanksCard';
 import type { InvestmentPlan } from '../../types/finance';
 
@@ -72,14 +73,16 @@ export function InvestPanel() {
           onEdit={() => setEditing(plan)}
           onDelete={() => deleteInvestmentPlan(plan.id)}
           onToggleScenario={(id) => saveInvestmentPlan({ ...plan, scenarios: plan.scenarios.includes(id) ? plan.scenarios.filter((s) => s !== id) : [...plan.scenarios, id] }, plan.id)}
-          onUseReturn={(bps) => saveInvestmentPlan({ ...plan, expectedReturnBps: bps }, plan.id)}
+          onSaveMix={async (allocation, mixName, returnBps) => {
+            await saveInvestmentPlan({ ...plan, allocation, mixName, expectedReturnBps: returnBps }, plan.id);
+          }}
         />
       )}
     </div>
   );
 }
 
-function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenario, onUseReturn }: { plan: InvestmentPlan; free: number; hasIncomeData: boolean; onEdit: () => void; onDelete: () => void; onToggleScenario: (id: ScenarioId) => void; onUseReturn: (bps: number) => void }) {
+function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenario, onSaveMix }: { plan: InvestmentPlan; free: number; hasIncomeData: boolean; onEdit: () => void; onDelete: () => void; onToggleScenario: (id: ScenarioId) => void; onSaveMix: (allocation: InvestmentPlan['allocation'], mixName: string | null, returnBps: number | null) => Promise<void> }) {
   const { macro, loading } = useCountryMacro(plan.country);
   const a = useMemo(() => assumptions(macro, plan.riskProfile, plan.expectedReturnBps), [macro, plan.riskProfile, plan.expectedReturnBps]);
   const scenarios = plan.scenarios as ScenarioId[];
@@ -104,6 +107,10 @@ function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenari
             </p>
           </div>
           <RowActions label={plan.name} onEdit={onEdit} onDelete={onDelete} />
+        </div>
+
+        <div className="mt-4">
+          <MixEditor plan={plan} onSave={onSaveMix} />
         </div>
 
         <div className="wp-stagger mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -192,7 +199,14 @@ function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenari
         </p>
       </section>
 
-      <MarketsCard country={plan.country} risk={plan.riskProfile} years={Math.max(1, Math.round(plan.horizonMonths / 12))} onUseReturn={onUseReturn} />
+      <MarketsCard
+        country={plan.country}
+        risk={plan.riskProfile}
+        years={Math.max(1, Math.round(plan.horizonMonths / 12))}
+        stressed={plan.scenarios.length > 0}
+        allocation={plan.allocation}
+        onApply={(mix) => onSaveMix(mix.picks.map((x) => ({ symbol: x.symbol, label: x.label, weightPct: x.weightPct })), mix.name, mix.expectedReturnBps)}
+      />
 
       <CountryCard country={plan.country} />
 
@@ -240,6 +254,8 @@ function PlanForm({ plan, defaults, onClose, onSave }: { plan: InvestmentPlan | 
             expectedReturnBps: ret.trim() === '' ? null : Math.round(parseFloat(ret) * 100),
             taxBps: Math.round((parseFloat(tax) || 0) * 100),
             scenarios: plan?.scenarios ?? [],
+            allocation: plan?.allocation ?? null,
+            mixName: plan?.mixName ?? null,
           },
           plan?.id
         );

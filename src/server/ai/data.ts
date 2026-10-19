@@ -11,6 +11,7 @@ import { getFxRates } from '../repos/fx';
 import { listAccounts } from '../repos/ledger';
 import { listPlans, listOffers } from '../repos/wealth';
 import { getCountryMacro } from '../repos/macro';
+import { getMarketStats } from '../repos/markets';
 import { convertMinor } from '@/lib/fx';
 
 export async function loadCopilotContext(userId: string): Promise<{ consent: AiConsentState; data: FinanceData }> {
@@ -21,7 +22,7 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
   const today = todayIn(user.timezone);
   const since = addDays(today, -400); // ≥ 13 months: covers year-to-date and month-over-month comparisons
 
-  const [txs, budgets, goals, bills, debts, accounts, fx, investments, loanOffers] = await Promise.all([
+  const [txs, budgets, goals, bills, debts, accounts, fx, investments, loanOffers, markets] = await Promise.all([
     prisma.transaction.findMany({
       where: { userId, status: { not: 'VOID' }, financialDate: { gte: since } },
       select: { id: true, financialDate: true, amountCents: true, category: true, currency: true, isTransfer: true, merchant: true, splits: { select: { category: true, amountCents: true } } },
@@ -36,6 +37,8 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
     getFxRates(),
     listPlans(userId),
     listOffers(userId),
+    // Only needed to build fund mixes; shared 15-minute cache.
+    getMarketStats().then((m) => m.stats).catch(() => []),
   ]);
   // Public country data for the user's plans (and their region), for the investment tools.
   const countries = [...new Set([...investments.map((p) => p.country), ...(user.region && user.region !== 'EU' ? [user.region] : [])])].slice(0, 5);
@@ -96,6 +99,7 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
       investments,
       loanOffers,
       macro,
+      markets,
       region: user.region,
     },
   };

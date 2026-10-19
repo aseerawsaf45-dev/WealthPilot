@@ -17,6 +17,7 @@ import { compareOffers, affordability } from '@/lib/planning/loans';
 import { payDebtOrInvest } from '@/lib/planning/link';
 import { countryName } from '@/lib/countries';
 import type { ScenarioId } from '@/lib/planning/scenarios';
+import type { InstrumentStats } from '@/lib/planning/markets';
 import { buildInsights, monthlyEquivalent } from '@/lib/ml';
 
 // ---- Data the tools run on (already scoped to one user) ---------------------
@@ -46,6 +47,8 @@ export interface FinanceData {
   loanOffers?: LoanOffer[];
   macro?: Record<string, CountryMacroData | null>;
   region?: string | null;
+  /** Market history of the fund universe (for building mixes in commands). */
+  markets?: InstrumentStats[];
   /** Set when foreign-currency rows were converted to `currency` (totals become estimates). */
   fxNote?: string;
 }

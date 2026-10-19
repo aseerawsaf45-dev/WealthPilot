@@ -4,7 +4,7 @@
  */
 
 import type { z } from 'zod';
-import type { InvestmentPlan as DbPlan, LoanOffer as DbOffer } from '@prisma/client';
+import { Prisma, type InvestmentPlan as DbPlan, type LoanOffer as DbOffer } from '@prisma/client';
 import { prisma } from '../db';
 import { writeAudit } from '../audit';
 import { HttpError } from '../http';
@@ -28,6 +28,8 @@ export function toClientPlan(r: DbPlan): InvestmentPlan {
     expectedReturnBps: r.expectedReturnBps,
     taxBps: r.taxBps,
     scenarios: r.scenarios,
+    allocation: (r.allocation as InvestmentPlan['allocation']) ?? null,
+    mixName: r.mixName,
     updatedAt: r.updatedAt.toISOString(),
   };
 }
@@ -59,7 +61,7 @@ export async function listPlans(userId: string) {
 
 export async function createPlan(userId: string, input: z.infer<typeof InvestmentPlanInput>) {
   return prisma.$transaction(async (tx) => {
-    const row = await tx.investmentPlan.create({ data: { ...input, userId, initialCents: BigInt(input.initialCents), monthlyCents: BigInt(input.monthlyCents) } });
+    const row = await tx.investmentPlan.create({ data: { ...input, userId, initialCents: BigInt(input.initialCents), monthlyCents: BigInt(input.monthlyCents), allocation: input.allocation ?? Prisma.JsonNull } });
     await writeAudit(tx, userId, 'INVESTMENT_PLAN_CREATED', `plan=${row.id}`);
     return toClientPlan(row);
   });
@@ -68,7 +70,7 @@ export async function createPlan(userId: string, input: z.infer<typeof Investmen
 export async function patchPlan(userId: string, id: string, patch: z.infer<typeof InvestmentPlanPatch>) {
   if (!(await prisma.investmentPlan.findFirst({ where: { id, userId }, select: { id: true } }))) throw notFound('Plan');
   return prisma.$transaction(async (tx) => {
-    const row = await tx.investmentPlan.update({ where: { id }, data: { ...patch, initialCents: big(patch.initialCents), monthlyCents: big(patch.monthlyCents) } });
+    const row = await tx.investmentPlan.update({ where: { id }, data: { ...patch, initialCents: big(patch.initialCents), monthlyCents: big(patch.monthlyCents), allocation: patch.allocation === undefined ? undefined : patch.allocation ?? Prisma.JsonNull } });
     await writeAudit(tx, userId, 'INVESTMENT_PLAN_UPDATED', `plan=${id} fields=${Object.keys(patch).join(',')}`);
     return toClientPlan(row);
   });
