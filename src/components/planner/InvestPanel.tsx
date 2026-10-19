@@ -13,6 +13,8 @@ import CurrencySelect from '../CurrencySelect';
 import { RowActions } from '../RowActions';
 import { CountryCard, useCountryMacro } from './CountryCard';
 import { LineChart } from './LineChart';
+import { MarketsCard } from './MarketsCard';
+import { BanksCard } from './BanksCard';
 import type { InvestmentPlan } from '../../types/finance';
 
 const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[#0F172A] text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500/20';
@@ -70,13 +72,14 @@ export function InvestPanel() {
           onEdit={() => setEditing(plan)}
           onDelete={() => deleteInvestmentPlan(plan.id)}
           onToggleScenario={(id) => saveInvestmentPlan({ ...plan, scenarios: plan.scenarios.includes(id) ? plan.scenarios.filter((s) => s !== id) : [...plan.scenarios, id] }, plan.id)}
+          onUseReturn={(bps) => saveInvestmentPlan({ ...plan, expectedReturnBps: bps }, plan.id)}
         />
       )}
     </div>
   );
 }
 
-function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenario }: { plan: InvestmentPlan; free: number; hasIncomeData: boolean; onEdit: () => void; onDelete: () => void; onToggleScenario: (id: ScenarioId) => void }) {
+function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenario, onUseReturn }: { plan: InvestmentPlan; free: number; hasIncomeData: boolean; onEdit: () => void; onDelete: () => void; onToggleScenario: (id: ScenarioId) => void; onUseReturn: (bps: number) => void }) {
   const { macro, loading } = useCountryMacro(plan.country);
   const a = useMemo(() => assumptions(macro, plan.riskProfile, plan.expectedReturnBps), [macro, plan.riskProfile, plan.expectedReturnBps]);
   const scenarios = plan.scenarios as ScenarioId[];
@@ -189,7 +192,11 @@ function PlanView({ plan, free, hasIncomeData, onEdit, onDelete, onToggleScenari
         </p>
       </section>
 
+      <MarketsCard country={plan.country} risk={plan.riskProfile} years={Math.max(1, Math.round(plan.horizonMonths / 12))} onUseReturn={onUseReturn} />
+
       <CountryCard country={plan.country} />
+
+      <BanksCard country={plan.country} purpose="deposit" />
     </div>
   );
 }

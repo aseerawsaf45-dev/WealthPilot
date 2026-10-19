@@ -1225,3 +1225,79 @@ describe('Debt-first vs invest net worth paths', async () => {
     assert.ok(last.debtFirstCents > last.investCents);
   });
 });
+
+describe('Bank picks and market history (deterministic)', async () => {
+  const B = await import('../src/lib/planning/banks.ts');
+  const M = await import('../src/lib/planning/markets.ts');
+  it('scores headlines with a visible lexicon and matches bank names', () => {
+    assert.ok(B.headlineSignal('BRAC Bank posts record profit, expands branches') > 0);
+    assert.ok(B.headlineSignal('Standard Chartered to exit retail banking amid losses') < 0);
+    assert.ok(B.mentions('BRAC Bank, City Bank in talks to take over StanChart retail', { name: 'BRAC Bank PLC', aliases: [] }));
+    assert.ok(B.mentions('StanChart exits retail', { name: 'Standard Chartered', aliases: ['StanChart'] }));
+    assert.ok(!B.mentions('Citizens of Dhaka', { name: 'Citigroup', aliases: ['Citibank'] }));
+  });
+  it('ranks banks with reasons and flags negative news', () => {
+    const bank = (name: string, fame: number, kind: 'local' | 'international' = 'local') => ({ id: name, name, website: null, kind, hq: 'BD', fame, aliases: [] });
+    const news = [
+      { title: 'Alpha Bank fined for money laundering, probe widens', url: 'https://x', domain: 'x', date: '2026-10-01', sourceCountry: 'BD' },
+      { title: 'Beta Bank posts record profit and launches digital loans', url: 'https://y', domain: 'y', date: '2026-10-02', sourceCountry: 'BD' },
+    ];
+    const r = B.rankBanks([bank('Alpha Bank', 30), bank('Beta Bank', 5), bank('Gamma Bank', 3)], news, 'loan');
+    assert.strictEqual(r.find((p) => p.bank.name === 'Alpha Bank')!.group, 'caution');
+    assert.strictEqual(r.find((p) => p.bank.name === 'Beta Bank')!.group, 'worth');
+    assert.ok(r.every((p) => p.reasons.length > 0));
+  });
+  it('market stats: annualised return, volatility, drawdown from monthly closes', () => {
+    const hist = Array.from({ length: 121 }, (_, i) => ({ date: `m${i}`, close: 100 * 1.01 ** i }));
+    hist[60].close = hist[59].close * 0.5; // one crash month
+    const s = M.computeStats(M.UNIVERSE[0], hist, { price: 1, time: null, currency: 'USD' });
+    assert.ok(Math.abs((s.return10yBps ?? 0) - Math.round((1.01 ** 12 - 1) * 10_000)) <= 2);
+    assert.ok((s.maxDrawdownBps ?? 0) <= -5000);
+    assert.ok((s.volatilityBps ?? 0) > 0);
+    const short = M.computeStats(M.UNIVERSE[0], hist.slice(0, 118), { price: 1, time: null, currency: 'USD' });
+    assert.ok(short.return10yBps !== null); // 3 months short still counts
+  });
+  it('suggests a mix that matches the risk profile and sums to ~100%', () => {
+    const mk = (symbol: string, r: number, vol: number, r1: number) => ({ ...M.UNIVERSE.find((u) => u.symbol === symbol)!, lastPrice: 1, lastTime: null, currency: 'USD', return1yBps: r1, return3yBps: r, return5yBps: r, return10yBps: r, volatilityBps: vol, maxDrawdownBps: -2000, history: [] });
+    const stats = [mk('ACWI', 900, 1500, 1000), mk('SPY', 1200, 1500, 1100), mk('EEM', 400, 1800, -500), mk('BNDX', 200, 400, 100), mk('GLD', 700, 1500, 300), mk('BIL', 200, 50, 400)];
+    const g = M.suggestMix(stats, 'growth', 10);
+    const c = M.suggestMix(stats, 'conservative', 10);
+    const sum = (m: typeof g) => m.picks.reduce((s, p) => s + p.weightPct, 0);
+    assert.ok(Math.abs(sum(g) - 100) <= 2 && Math.abs(sum(c) - 100) <= 2);
+    assert.ok((g.expectedReturnBps ?? 0) > (c.expectedReturnBps ?? 0));
+    assert.ok(!g.picks.some((p) => p.symbol === 'EEM')); // negative last year → not picked
+  });
+});
+
+describe('AI bank brief grounding', async () => {
+  const { groundBrief } = await import('../src/lib/planning/banks.ts');
+  it('keeps numbers only when the headlines contain them', () => {
+    const pick = { articles: [{ title: 'BRAC Bank profit up 20% in Q3', url: '', domain: '', date: '', sourceCountry: '' }], reasons: ['calculated reason'] };
+    assert.deepStrictEqual(groundBrief(pick, 'Profit rose 20% last quarter.'), { text: 'Profit rose 20% last quarter.', source: 'llm' });
+    assert.deepStrictEqual(groundBrief(pick, 'Offers 9.5% loans.'), { text: 'calculated reason', source: 'rules' });
+    assert.strictEqual(groundBrief(pick, undefined).source, 'rules');
+  });
+});
+
+describe('GDELT parsing (real response shape)', async () => {
+  const { parseGdelt, rankBanks } = await import('../src/lib/planning/banks.ts');
+  it('parses articles, drops duplicates and rate-limit notices, and feeds the ranking', () => {
+    const sample = JSON.stringify({ articles: [
+      { url: 'https://www.thedailystar.net/business/news/brac-bank-city-bank-talks-take-over-stanchart-retail-business-4278741', url_mobile: '', title: 'Standard Chartered to Exit Retail Banking in Bangladesh | BRAC Bank , City Bank in talks to take over StanChart retail business', seendate: '20260921T101500Z', socialimage: '', domain: 'thedailystar.net', language: 'English', sourcecountry: 'Bangladesh' },
+      { url: 'https://www.thedailystar.net/dup', title: 'Standard Chartered to Exit Retail Banking in Bangladesh | BRAC Bank , City Bank in talks to take over StanChart retail business', seendate: '20260921T101500Z', domain: 'thedailystar.net', sourcecountry: 'Bangladesh' },
+      { url: 'javascript:alert(1)', title: 'bad link', seendate: '20260921T101500Z', domain: 'x', sourcecountry: 'Bangladesh' },
+    ] });
+    const arts = parseGdelt(sample)!;
+    assert.strictEqual(arts.length, 1);
+    assert.strictEqual(arts[0].date, '2026-09-21');
+    assert.strictEqual(parseGdelt('Please limit requests to one every 5 seconds'), null);
+    const picks = rankBanks([
+      { id: 'brac', name: 'BRAC Bank PLC', website: null, kind: 'local', hq: 'BD', fame: 6, aliases: [] },
+      { id: 'sc', name: 'Standard Chartered', website: null, kind: 'international', hq: 'GB', fame: 40, aliases: ['StanChart'] },
+    ], arts, 'loan');
+    const brac = picks.find((p) => p.bank.id === 'brac')!;
+    const sc = picks.find((p) => p.bank.id === 'sc')!;
+    assert.strictEqual(brac.articles.length, 1);
+    assert.ok(brac.signal > 0 && sc.articles.length === 1);
+  });
+});

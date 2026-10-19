@@ -431,3 +431,12 @@ model CountryMacro {
 
   @@map("country_macros")
 }
+
+// Public third-party data (bank lists, news, market history) cached by key. Never user data.
+model ExternalCache {
+  key       String   @id
+  data      Json
+  fetchedAt DateTime @default(now())
+
+  @@map("external_cache")
+}

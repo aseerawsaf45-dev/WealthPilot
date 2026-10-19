@@ -184,6 +184,8 @@ export async function exportUserData(userId: string) {
     goals: goals.map(toClientGoal),
     bills: bills.map((b) => toClientBill(b, today)),
     debts: debts.map(toClientDebt),
+    investmentPlans,
+    loanOffers,
     auditLog: audit.map(toClientAudit),
   };
 }
