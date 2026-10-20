@@ -19,14 +19,14 @@ const INK = '0F172A';
 const MUTED = '64748B';
 
 // ---- meta → Markdown (idempotent) -------------------------------------------------------
+// Empty values never overwrite what is already in the Markdown (the README may be edited by hand).
 const metaValue = (key) => {
-  if (key === 'liveUrl') return meta.liveUrl || 'to be added';
-  if (key === 'team') return [meta.team, ...(meta.members ?? []).map((m) => (m.role ? `${m.name} (${m.role})` : m.name))].filter(Boolean).join(' · ') || 'WealthPilot Team';
-  return String(meta[key] ?? '');
+  if (key === 'team') return meta.team ? (meta.teamLink ? `[${meta.team}](${meta.teamLink})` : meta.team) : null;
+  return meta[key] ? String(meta[key]) : null;
 };
 for (const f of ['README.md', 'docs/TECHNICAL_DOCUMENTATION.md']) {
   const src = fs.readFileSync(f, 'utf8');
-  const out = src.replace(/<!-- meta:(\w+) -->[\s\S]*?<!-- \/meta -->/g, (_, k) => `<!-- meta:${k} -->${metaValue(k)}<!-- /meta -->`);
+  const out = src.replace(/<!-- meta:(\w+) -->([\s\S]*?)<!-- \/meta -->/g, (_, k, old) => `<!-- meta:${k} -->${metaValue(k) ?? old}<!-- /meta -->`);
   if (out !== src) fs.writeFileSync(f, out);
 }
 
@@ -69,6 +69,7 @@ function inline(text, base, opts = {}) {
 
 // ---- block Markdown → docx elements -----------------------------------------------------
 let listInstance = 0;
+const SPACER = () => Object.assign(new Paragraph({ spacing: { after: 120 }, children: [] }), { isSpacer: true });
 function splitRow(line) {
   return line
     .trim()
@@ -80,7 +81,7 @@ function splitRow(line) {
 function table(lines, base, contentWidth) {
   const rows = lines.filter((l, i) => !(i === 1 && /^\|?\s*:?-{2,}/.test(l))).map(splitRow);
   const cols = Math.max(...rows.map((r) => r.length));
-  const longest = Array.from({ length: cols }, (_, c) => Math.max(...rows.map((r) => (r[c] ?? '').replace(/!\[[^\]]*\]\([^)]+\)/g, 'x'.repeat(60)).replace(/<br>/g, ' ').length)));
+  const longest = Array.from({ length: cols }, (_, c) => Math.max(...rows.map((r) => (r[c] ?? '').replace(/!\[[^\]]*\]\([^)]+\)/g, 'x'.repeat(60)).replace(/<br>/g, ' ').replace(/\*\*|`/g, '').length))); // size by visible text, not Markdown markers
   // Short columns (#, HTTP, ms, PASS) get a fixed width that fits them, so they never wrap letter by letter;
   // the rest of the width is shared by the long columns in proportion to their content.
   const fixed = longest.map((len) => (len <= 9 ? (len + 1) * 115 + 200 : 0));
@@ -157,7 +158,7 @@ function blocks(md, base, contentWidth) {
       for (; i < lines.length && /^\|/.test(lines[i]); i++) t.push(lines[i]);
       i--;
       out.push(table(t, base, contentWidth));
-      out.push(new Paragraph({ spacing: { after: 120 }, children: [] }));
+      out.push(SPACER());
       continue;
     }
     const img = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
@@ -196,6 +197,7 @@ function blocks(md, base, contentWidth) {
     para.push(line.trim());
   }
   flush();
+  if (out.at(-1)?.isSpacer) out.pop(); // a spacer after the last table would start an empty page
   return out;
 }
 
@@ -206,7 +208,6 @@ function cover(no, title, subtitle) {
       spacing: { after: 80 },
       children: [new TextRun({ text: `${label}  `, bold: true, color: MUTED, size: 22 }), ...(/^https?:/.test(value) ? [new ExternalHyperlink({ link: value, children: [new TextRun({ text: value, style: 'Hyperlink', size: 22 })] })] : [new TextRun({ text: value, size: 22, color: INK })])],
     });
-  const members = (meta.members ?? []).map((m) => (m.role ? `${m.name} (${m.role})` : m.name)).join(', ');
   return [
     new Paragraph({ spacing: { before: 1800, after: 120 }, children: [new TextRun({ text: 'Shenzhen International FinTech Competition 2026', size: 24, color: MUTED })] }),
     new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: `DELIVERABLE ${no}`, bold: true, size: 26, color: '7C3AED' })] }),
@@ -214,7 +215,15 @@ function cover(no, title, subtitle) {
     new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: title, bold: true, size: 40, color: NAVY })] }),
     new Paragraph({ spacing: { after: 900 }, border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: NAVY, space: 8 } }, children: [new TextRun({ text: subtitle, size: 24, color: MUTED })] }),
     line('Team', meta.team || 'WealthPilot Team'),
-    ...(members ? [line('Members', members)] : []),
+    ...(meta.members ?? []).map(
+      (m) =>
+        new Paragraph({
+          spacing: { after: 40 },
+          indent: { left: 360 },
+          children: [new TextRun({ text: m.name, bold: true, size: 21, color: INK }), ...(m.role ? [new TextRun({ text: `  ·  ${m.role}`, size: 19, color: MUTED })] : [])],
+        })
+    ),
+    ...(meta.institution ? [new Paragraph({ spacing: { after: 120 }, indent: { left: 360 }, children: [new TextRun({ text: meta.institution, italics: true, size: 19, color: MUTED })] })] : []),
     line('Live application', meta.liveUrl || 'to be added'),
     line('Source code', meta.github),
     line('Version', `${meta.version} · ${meta.date}`),
@@ -265,11 +274,19 @@ function buildDoc({ no, title, subtitle, sources, landscape, file, tocLevels = 3
     ],
   });
   return Packer.toBuffer(doc).then((buf) => {
-    fs.writeFileSync(file, buf);
-    console.log(`${file}  ${(buf.length / 1024).toFixed(0)} KB`);
+    try {
+      fs.writeFileSync(file, buf);
+      console.log(`${file}  ${(buf.length / 1024).toFixed(0)} KB`);
+    } catch (e) {
+      if (e.code !== 'EBUSY' && e.code !== 'EPERM') throw e;
+      console.warn(`SKIPPED ${file}: it is open in another program (Word?). Close it and run npm run docs:build again.`);
+      process.exitCode = 1;
+    }
   });
 }
 
 await buildDoc({ no: '01', title: 'Technical Documentation', subtitle: 'System architecture · Core algorithms · Security design', sources: ['docs/TECHNICAL_DOCUMENTATION.md'], file: 'submission/01_Technical_Documentation.docx' });
 await buildDoc({ no: '04', title: 'Source Code: README, Deployment and Test Cases', subtitle: 'Repository guide · Deployment instructions · Test catalogue with results', sources: ['README.md', 'docs/DEPLOYMENT.md', 'docs/TEST_CASES.md'], file: 'submission/04_Source_Code_README_Deployment_Tests.docx', tocLevels: 2 });
+await buildDoc({ no: '04A', title: 'Test Report', subtitle: 'Strategy · Results · Traceability · Defect analysis', sources: ['docs/TEST_REPORT.md', 'docs/TEST_CASES.md'], file: 'submission/04A_Test_Report.docx', tocLevels: 2 });
+await buildDoc({ no: '05', title: 'Security Self-Assessment Report', subtitle: 'Permission-tier implementation · Control assessment · Known-risk list', sources: ['docs/SECURITY_SELF_ASSESSMENT.md', 'docs/ROUTE_INVENTORY.md'], landscape: true, file: 'submission/05_Security_Self_Assessment_Report.docx', tocLevels: 2 });
 await buildDoc({ no: '06', title: 'Simulated-Account / Sandbox Operation Logs', subtitle: 'Execution evidence for a non-on-chain topic', sources: ['docs/SANDBOX_OPERATION_LOG.md'], landscape: true, file: 'submission/06_Sandbox_Operation_Logs.docx' });

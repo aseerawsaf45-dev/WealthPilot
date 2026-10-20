@@ -1,7 +1,15 @@
 {
-  "team": "",
-  "members": [],
-  "liveUrl": "",
+  "team": "Team Joker",
+  "teamLink": "https://github.com/aseerawsaf45-dev/WealthPilot#team-joker",
+  "members": [
+    { "name": "Md. Rezwanur Rahman Utshaw", "role": "Industrial Engineering and Management, KUET" },
+    { "name": "Gazi Faysal Jubayer", "role": "Mechanical Engineering, KUET" },
+    { "name": "Aseer Awsaf", "role": "Textile Engineering, KUET" },
+    { "name": "Salman Farshi Alam", "role": "Textile Engineering, KUET" },
+    { "name": "Sanjid Hasan", "role": "Electrical and Electronic Engineering, KUET" }
+  ],
+  "institution": "Khulna University of Engineering & Technology (KUET), Bangladesh",
+  "liveUrl": "https://darkslategray-duck-848813.hostingersite.com/",
   "github": "https://github.com/aseerawsaf45-dev/WealthPilot",
   "version": "1.0",
   "date": "2026-10-20"

@@ -108,5 +108,44 @@ Each case runs the real orchestrator with fixture data and, where set, a scripte
 ${evalCases.map((c, i) => `| ${i + 1} | \`${c.id}\` | ${esc(String(c.question ?? '').slice(0, 90))} | ${esc(expectText(c.expect))} | ${evalPass.has(c.id) ? 'PASS' : 'FAIL'} |`).join('\n')}
 `;
 fs.writeFileSync('docs/TEST_CASES.md', md);
+
+// Results by functional area for docs/TEST_REPORT.md (written between <!-- gen:areas --> markers).
+const AREAS: Array<[string, RegExp]> = [
+  ['Partner offers', /partner offers/i],
+  ['Planning: budgets, goals, debts', /goal|Debt Payoff/i],
+  ['Wealth planner: loans, investing, banks, markets', /Wealth planner|Debt-first|Bank picks|GDELT|mixes|Loans:|Copilot control of the Planner/i],
+  // Import before AI: "Document extraction (… + AI grounding)" is an import suite.
+  ['Import and document reading', /CSV Parsing|import|Document extraction|Ambiguous dates/i],
+  ['AI copilot: grounding, commands, privacy', /Copilot|Grounding|privacy gateway|Assistant commands|chat history|bank brief/i],
+  ['ML insights', /ML insights/i],
+  ['Security, privacy and compliance', /Security|Privacy|GDPR|Sarbanes|Gramm|PCI|Multi-Tenant|Authentication|CSRF|input validation|Hooks|platform/i],
+  ['Money, currencies and ledger', /Financial Math|Cash Flow|Net Worth|currencies|ledger|CRUD|mappers/i],
+];
+const areaOf = (suite: string) => AREAS.find(([, re]) => re.test(suite))?.[0] ?? 'Other';
+const byArea = new Map<string, { unit: number; integ: number; pass: number; total: number }>();
+const bump = (suite: string, kind: 'unit' | 'integ', pass: boolean) => {
+  const a = byArea.get(areaOf(suite)) ?? { unit: 0, integ: 0, pass: 0, total: 0 };
+  a[kind]++;
+  a.total++;
+  if (pass) a.pass++;
+  byArea.set(areaOf(suite), a);
+};
+unitRows.forEach((r) => bump(r.suite, 'unit', r.pass));
+integRows.forEach((r) => bump(r.suite, 'integ', r.pass));
+const areaOrder = [...AREAS.map(([n]) => n), 'Other'].filter((n) => byArea.has(n));
+const evalsPassed = evalCases.filter((c) => evalPass.has(c.id)).length;
+const grand = unitRows.length + integRows.length + evalCases.length;
+const grandPass = unitRows.filter((r) => r.pass).length + integRows.filter((r) => r.pass).length + evalsPassed;
+const areasMd = `| Functional area | Unit / logic | DB integration | Passed |
+|---|---|---|---|
+${areaOrder.map((n) => { const a = byArea.get(n)!; return `| ${n} | ${a.unit} | ${a.integ} | ${a.pass} / ${a.total} |`; }).join('\n')}
+| AI copilot evaluations (scripted models) | | | ${evalsPassed} / ${evalCases.length} |
+| **All automated test cases** | **${unitRows.length}** | **${integRows.length}** | **${grandPass} / ${grand}** |
+
+_Generated ${date} by \`scripts/test-catalogue.mts\`; integration ${integ ? 'ran on a Neon test branch' : 'was not run (no DATABASE_URL)'}._`;
+if (fs.existsSync('docs/TEST_REPORT.md')) {
+  const rep = fs.readFileSync('docs/TEST_REPORT.md', 'utf8');
+  fs.writeFileSync('docs/TEST_REPORT.md', rep.replace(/<!-- gen:areas -->[\s\S]*?<!-- \/gen -->/, `<!-- gen:areas -->\n${areasMd}\n<!-- /gen -->`));
+}
 const failed = unitRows.filter((r) => !r.pass).length + integRows.filter((r) => !r.pass).length + evalCases.filter((c) => !evalPass.has(c.id)).length;
 console.log(`unit ${unitRows.length}, integration ${integRows.length}, evals ${evalCases.length}, failed ${failed}, tsc ${tsc.out.trim() ? 'ERR' : 'ok'}, security ${secOk ? 'ok' : 'FAIL'}`);

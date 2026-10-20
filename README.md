@@ -29,8 +29,8 @@
 |---|---|
 | Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
-| Team | <!-- meta:team -->[Team Joker](https://github.com/aseerawsaf45-dev/WealthPilot/edit/main/README.md#team-joker)<!-- /meta --> |
-| Documentation | [Technical documentation](docs/TECHNICAL_DOCUMENTATION.md) · [Deployment](docs/DEPLOYMENT.md) · [Test cases](docs/TEST_CASES.md) · [Sandbox operation logs](docs/SANDBOX_OPERATION_LOG.md) |
+| Team | <!-- meta:team -->[Team Joker](https://github.com/aseerawsaf45-dev/WealthPilot#team-joker)<!-- /meta --> |
+| Documentation | [Technical documentation](docs/TECHNICAL_DOCUMENTATION.md) · [Deployment](docs/DEPLOYMENT.md) · [Test cases](docs/TEST_CASES.md) · [Test report](docs/TEST_REPORT.md) · [Security self-assessment](docs/SECURITY_SELF_ASSESSMENT.md) · [Sandbox operation logs](docs/SANDBOX_OPERATION_LOG.md) |
 | Word versions | [`submission/`](submission/) |
 
 ## What it does

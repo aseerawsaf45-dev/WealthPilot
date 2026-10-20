@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | Product | WealthPilot: a personal finance workspace with a grounded AI copilot, debt and wealth planner, and partner offers |
-| Team | <!-- meta:team -->WealthPilot Team<!-- /meta --> |
-| Live application | <!-- meta:liveUrl -->to be added<!-- /meta --> |
+| Team | <!-- meta:team -->[Team Joker](https://github.com/aseerawsaf45-dev/WealthPilot#team-joker)<!-- /meta --> |
+| Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
 | Companion documents | README and deployment guide (deliverable 04), test cases (`docs/TEST_CASES.md`), sandbox operation logs (deliverable 06) |
 
@@ -325,7 +325,7 @@ The Permissions-Policy denies the camera, microphone and payment APIs, and limit
 
 ### 4.6 Known risks and planned fixes
 
-We list these openly; none is hidden by the tests.
+We list these openly; none is hidden by the tests. The full ranked risk register (20 risks, including dependency-audit and live-site findings) and the permission-tier implementation are in the Security Self-Assessment Report (deliverable 05).
 
 | # | Risk | Impact | Planned fix |
 |---|---|---|---|
