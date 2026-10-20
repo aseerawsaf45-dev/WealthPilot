@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | Product | WealthPilot: a personal finance workspace with a grounded AI copilot, debt and wealth planner, and partner offers |
-| Team | <!-- meta:team -->WealthPilot Team<!-- /meta --> |
-| Live application | <!-- meta:liveUrl -->to be added<!-- /meta --> |
+| Team | <!-- meta:team -->Team Joker<!-- /meta --> |
+| Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
 | Companion documents | README and deployment guide (deliverable 04), test cases (`docs/TEST_CASES.md`), sandbox operation logs (deliverable 06) |
 
@@ -130,15 +130,52 @@ All algorithms below are deterministic and explainable: the same inputs always g
 
 ### 3.1 Exact money arithmetic
 
-- **Representation.** Amounts are integer minor units. Parsing (`toMinor`, `dollarsToCents` in `src/lib/money.ts`) works on the decimal string, not on floating point, so `0.1 + 0.2` problems cannot occur. The currency exponent comes from ISO-4217, so JPY has 0 decimals and BHD has 3. Storage is `BigInt`; the API boundary accepts only `z.number().int().safe()`. The sandbox run shows a float amount being refused with a 400.
-- **Conversion.** `convertMinor` (`src/lib/fx.ts`) converts between currencies with that day's rate and rounds once at the end. Totals that include converted amounts are labelled estimates. Rates are never mixed silently.
-- **Derived balances.** An account's balance is `openingBalanceCents + Σ amountCents` of its non-VOID transactions (`listAccounts`, `accountWithBalance` in `src/server/repos/ledger.ts`). "Set my balance to X" is stored as a new opening balance, X − Σ.
-- **Deletion.** Deleting a transaction sets `VOID`, which keeps the audit trail while the balance updates.
+WealthPilot stores monetary values as integer minor units rather than binary floating-point amounts. The exponent is currency-specific and is defined by `minorUnits` in `src/lib/currency.ts`: JPY uses zero decimal places, most listed currencies use two, and BHD uses three. Database money columns use PostgreSQL `BIGINT` through Prisma. API inputs are validated as safe integers before persistence.
+
+**Minor-unit representation.** For currency \(c\), let \(d_c\) be its minor-unit exponent and \(A\) the user-entered amount in major units. The intended representation is
+
+$$
+M_c = \operatorname{round}_{\text{half-away-from-zero}}\!\left(A\,10^{d_c}\right).
+$$
+
+Here, \(M_c\) is an integer count of minor units. The actual parser (`toMinor` in `src/lib/money.ts`) parses decimal text using string arithmetic, pads or truncates fractional digits to the currency exponent, and rounds using the next digit. This avoids relying on binary floating-point arithmetic to parse a decimal string. Unparseable inputs and values outside JavaScript's safe-integer range return the documented fallback rather than being persisted as an arbitrary amount.
+
+**Derived account balance.** Let \(O_i\) be account \(i\)'s opening balance and let \(T_i\) be its transactions. Its current ledger balance is derived as
+
+$$
+B_i = O_i + \sum_{t\in T_i,\;\operatorname{status}(t)\ne\text{VOID}} a_t,
+$$
+
+where \(a_t\) is the signed transaction amount in the account's currency. The ledger repositories (`listAccounts` and `accountWithBalance` in `src/server/repos/ledger.ts`) calculate this value; they do not maintain a separately mutable balance field. Setting a balance to target \(X\) creates an opening-balance adjustment equal to \(X-\sum_t a_t\) for the applicable non-VOID transactions.
+
+**Split conservation.** For a transaction amount \(a\) divided into \(n\) category splits with amounts \(s_1,\ldots,s_n\), the invariant is
+
+$$
+\sum_{j=1}^{n}s_j=a.
+$$
+
+`validateSplitPreservation` in `src/lib/money.ts` checks this equality exactly in minor units. A non-zero difference is a validation failure; no tolerance is applied.
+
+**Foreign-exchange conversion.** Rates in `src/lib/fx.ts` are stored as integer strings scaled by \(S=10^9\), with \(r_c\) denoting units of currency \(c\) per one unit of the snapshot base currency. For a source amount \(M_f\), source currency \(f\), target currency \(t\), and exponents \(d_f,d_t\), conversion is
+
+$$
+M_t=\operatorname{round}_{\text{even}}\!\left(\frac{M_f\,r_t\,10^{d_t}}{r_f\,10^{d_f}}\right),
+$$
+
+where \(\operatorname{round}_{\text{even}}\) is round-half-to-even integer division. Same-currency conversion returns the original amount; if a rate is unavailable, conversion returns `null` and the total reports the omitted currency rather than silently mixing currencies. Cross-currency totals are estimates tied to the dated rate snapshot and should be labelled as such.
+
+**Rounding and deletion.** The string parser uses half-away-from-zero rounding for entered decimal text; FX conversion uses half-to-even integer division. These are distinct, intentional boundaries. Deleting a transaction changes its status to `VOID`, preserving the audit record while excluding that row from the derived balance. The sandbox evidence includes rejection of an invalid floating-point amount at the API boundary.
 
 ### 3.2 Statement import: idempotent and reversible
 
 1. Each row is validated on its own (`ImportRow`). Bad rows are reported with their index; they are never dropped silently. At most 2,000 rows per import.
-2. **Fingerprint:** `sha256(date | lower(merchant) | amount | occurrence-in-file)`. The occurrence index keeps two identical coffees on one day distinct, while importing the same file again maps to the same fingerprints.
+2. **Fingerprint:** the row fingerprint is computed from the concatenation of date, lower-cased merchant, amount, and occurrence-in-file index:
+
+   $$
+   F=\operatorname{SHA256}(\text{date}\,|\,\operatorname{lower}(\text{merchant})\,|\,\text{amount}\,|\,\text{occurrence}).
+   $$
+
+   The occurrence index keeps two otherwise identical same-day purchases distinct, while re-importing the same file reproduces the same fingerprints.
 3. `createMany(..., skipDuplicates)` against the unique index `(userId, importFingerprint)` makes re-imports idempotent. The sandbox run imported a 7-row statement, then imported it again: 6 inserted, 1 rejected, then 0 inserted and 6 duplicates.
 4. **Rollback:** every row of a batch shares `importBatchId`. Undo voids them and clears their fingerprints in one transaction, so the file can be imported again later.
 
@@ -147,34 +184,124 @@ All algorithms below are deterministic and explainable: the same inputs always g
 | Model | Method | Guards |
 |---|---|---|
 | Categorisation (ML-01, `categorize.ts`) | Ordered evidence: the user's own rules, then what the user called this merchant before (share of past rows), then a short global keyword list | Suggestions only; the user confirms each change; confidence 0–100 |
-| Recurring detection (ML-02, `recurring.ts`) | A payee is recurring with ≥ 3 rows, a median gap within ±20% of a cadence (weekly to annual), and amount variation (coefficient of variation) < 0.15 | Offers "Track as a bill" only if no similar bill exists |
-| Unusual spending (ML-03, `anomalies.ts`) | Modified z-score per category, z = 0.6745 · (x − median) / MAD, flagged when z > 3.5 (Iglewicz & Hoaglin). If MAD = 0, flagged at ≥ 2× the median | Needs ≥ 8 earlier expenses spanning ≥ 60 days |
+| Recurring detection (ML-02, `recurring.ts`) | At least 3 distinct dates; median gap matches a known cadence within 20%; coefficient of variation < 0.15 for all observations or for earlier observations excluding the latest when there are at least 4 | Offers "Track as a bill" only if no similar bill exists |
+| Unusual spending (ML-03, `anomalies.ts`) | Modified z-score per category, defined below; flag when \(z>3.5\). If MAD = 0, flag at \(x\geq 2\widetilde{x}\) | Needs ≥ 8 earlier expenses spanning ≥ 60 days |
 | Cash-flow forecast (ML-04, `forecast.ts`) | 30/60/90 days: balance + expected recurring income − bills due − typical everyday spending. The P10–P90 band comes from the spread of real 30-day everyday-spending totals over the last 180 days, scaled to each horizon | Needs ≥ 60 days of history, otherwise says so; reports the first day the balance would go below zero |
 | Goal ETA (ML-05, `monthly.ts`) | Months = remaining ÷ monthly saving, with ±20% sensitivity on the saving rate, giving a likely finish window | "Never at this rate" when saving ≤ 0 |
 | Budget pacing | Spend projected to month end at the current pace, compared with the same days of the previous month | Like-for-like days, so a half month is compared fairly |
 
-Statistics (medians, z-scores) use plain numbers only as ratios; amounts stay integers.
+**Cash-flow forecast formulation.** For horizon \(H\in\{30,60,90\}\) days, the implementation counts recurring income events as \(I_H\), scheduled bills and recurring outflows as \(L_H\), and estimates everyday spending by scaling the median rolling 30-day everyday-spending total \(E_{30}\):
+
+$$
+E_H=\operatorname{round}\!\left(E_{30}\frac{H}{30}\right),\qquad
+\widehat{B}_H=B_0+I_H-L_H-E_H.
+$$
+
+The displayed range uses historical spread terms \(U\) and \(D\), derived from the 90th and 10th percentiles of rolling 30-day spending totals over up to 180 days:
+
+$$
+B_H^{\mathrm{low}}=\widehat{B}_H-\operatorname{round}\!\left(U\frac{H}{30}\right),\qquad
+B_H^{\mathrm{high}}=\widehat{B}_H+\operatorname{round}\!\left(D\frac{H}{30}\right).
+$$
+
+These endpoints are labelled P10 and P90 in the interface, but they are heuristic bounds constructed by scaling empirical spending spreads; they are not calibrated probabilistic coverage intervals. Forecasting is withheld unless at least 60 days of transaction history are available. The implementation also estimates the first day the expected balance falls below zero by walking scheduled events day by day.
+
+For unusual-spending detection, the category median and median absolute deviation (MAD) are computed from eligible historical expenses:
+
+$$
+\widetilde{x}=\operatorname{median}(x_1,\ldots,x_n),\qquad
+\operatorname{MAD}=\operatorname{median}\bigl(|x_i-\widetilde{x}|\bigr).
+$$
+
+When \(\operatorname{MAD}>0\), the modified z-score for a candidate expense \(x\) is
+
+$$
+z=\frac{0.6745\,(x-\widetilde{x})}{\operatorname{MAD}}.
+$$
+
+The implementation flags the candidate only when \(z>3.5\) and the category has at least eight earlier expenses spanning at least 60 days. When MAD is zero, the fallback is \(x\geq 2\widetilde{x}\); no z-score is reported for that fallback. These are deterministic heuristics, not a diagnosis of fraud or a statistical guarantee.
+
+For recurring detection, let \(g\) be the median gap between distinct payment dates and \(d_c\) the nominal gap for cadence \(c\). The cadence test is
+
+$$
+|g-d_c|\leq 0.2d_c,
+$$
+
+with nominal gaps of 7, 14, 30.4, 91.3, and 365.25 days for weekly, biweekly, monthly, quarterly, and annual cadence, respectively. The amount-stability coefficient is the population standard deviation divided by the mean, \(\operatorname{CV}=s/\bar{x}\). A series passes the amount-stability test when \(\operatorname{CV}<0.15\) for all amounts or, where at least four observations exist, for the earlier amounts excluding the latest observation.
+
+**Goal completion estimate.** For remaining goal amount \(R\) and positive monthly saving rate \(M\), the estimated number of months is
+
+$$
+N=\left\lceil\frac{R}{M}\right\rceil.
+$$
+
+The sensitivity window recomputes the estimate at \(1.2M\) and \(0.8M\):
+
+$$
+N_{\mathrm{early}}=\left\lceil\frac{R}{1.2M}\right\rceil,\qquad
+N_{\mathrm{late}}=\left\lceil\frac{R}{0.8M}\right\rceil.
+$$
+
+If \(R\leq0\), the estimate is zero; if \(M\leq0\) while money remains, the completion time is reported as unavailable (“never at this rate”). For a target date, the implementation estimates months remaining using 30.44 days per month and computes the required monthly amount by rounding up.
+
+Statistics (medians, z-scores) use numeric ratios only; stored amounts remain integer minor units.
 
 ### 3.4 Goal planner
 
-The planner (`planGoal` in `src/server/ai/tools.ts`) works from the user's real history:
+The planner (`planGoal` in `src/server/ai/tools.ts`) uses the user's recent completed-month history and accounts for other dated goals before recommending a saving rate.
 
-- **Inputs:** average monthly income and spending over the last complete months (up to three), giving the surplus. Other dated goals compete for it: `free = surplus − Σ (remaining_g ÷ months_left_g)`.
-- **Comfortable rate:** `comfortable = ⌊free / 2⌋`, keeping half of the free money for surprises.
-- **Verdict with a deadline:** `required = ⌈remaining ÷ months_left⌉`.
-  - **on track** if `required ≤ comfortable`;
-  - **stretch** if `required ≤ free`;
-  - **not reachable** otherwise.
-- **Options when not on track:** move the deadline (at the comfortable rate), trim flexible categories (largest first, never fixed costs such as rent), lower the target, or pause other goals. Each option is marked feasible or not.
-- **Applying an option:** `applyGoalPlanOption` (`src/server/repos/planning.ts`) applies an option **from the stored plan snapshot**, never from client input, in one transaction. Budget cuts keep the user's alert thresholds.
+Let \(I\) and \(E\) be average monthly income and expenses over up to three recent complete months. The estimated monthly surplus is
+
+$$
+S=I-E.
+$$
+
+For each other dated goal \(g\), let \(R_g\) be its remaining amount and \(m_g\) the months remaining. The uncommitted monthly surplus is
+
+$$
+F=S-\sum_g\left\lceil\frac{R_g}{m_g}\right\rceil,\qquad C=\left\lfloor\frac{\max(0,F)}{2}\right\rfloor,
+$$
+
+where \(C\) is the planner's “comfortable” monthly saving rate; half of the uncommitted amount is reserved as a buffer. For the goal being evaluated, with remaining amount \(R\) and \(m\) months left, the required monthly saving is
+
+$$
+Q=\left\lceil\frac{R}{m}\right\rceil.
+$$
+
+The verdict is **not reachable** when \(F\leq0\) or \(Q>F\), **on track** when \(Q\leq C\), and **stretch** otherwise. These classifications depend on historical averages and entered dates; they are not guarantees of future affordability. The implementation also checks edge cases such as goals with no positive saving rate.
+
+**Options when a goal is not on track.** The planner may move the deadline, trim flexible categories (largest first, not fixed costs such as rent), lower the target, or pause other goals. Each option is marked feasible or not. `applyGoalPlanOption` (`src/server/repos/planning.ts`) applies an option from the stored plan snapshot—not client-supplied replacement values—in one transaction. Budget cuts preserve the user's alert thresholds.
 
 ### 3.5 Debt payoff and loans (`src/services/debtService.ts`, `src/lib/planning/loans.ts`, `link.ts`)
 
 - **Snowball vs avalanche:** a month-by-month simulation. Interest accrues at APR/12 (rounded to minor units) and minimums are paid. Freed-up minimums from paid-off debts roll into the next target (lowest balance first, or highest APR first). The simulation is capped at 360 months.
-- **Loan payment (EMI):** `EMI = ⌈P · r / (1 − (1 + r)^−n)⌉`, with r = APR/12 and n months. A 0% APR gives P/n. The amortisation schedule lets the last payment absorb rounding, so the balance ends at exactly 0.
-- **Effective APR including fees:** the rate at which the payments repay only the cash actually received (P − fee). It is found by bisection (80 iterations) on the present value of the payment stream.
-- **Affordability (DTI):** (new EMI + existing minimums) ÷ average monthly income. ≤ 36% is healthy, ≤ 43% is stretched (most lenders' limit), above that is risky.
-- **How much can I borrow:** monthly room = ⌊income × 36% (or 43%)⌋ − existing minimums. Then `maxPrincipal(room, APR, n)` inverts the EMI formula and steps down past the rounding edge, so the EMI of the result never exceeds the room. A unit test proves it is the largest such loan within one minor unit.
+- **Monthly rate.** APR is represented in basis points (\(10{,}000\) bps = 100%). The monthly rate is \(r=\operatorname{APR}_{\mathrm{bps}}/(10{,}000\cdot12)\).
+- **Equated monthly instalment (EMI).** For principal \(P\), monthly rate \(r\), and \(n\) payments,
+
+  $$
+  \operatorname{EMI}=\begin{cases}
+  \left\lceil P/n\right\rceil, & r=0,\\[4pt]
+  \left\lceil\dfrac{Pr}{1-(1+r)^{-n}}\right\rceil, & r>0.
+  \end{cases}
+  $$
+
+  The implementation rounds the EMI up to an integer minor unit. Monthly interest is rounded to an integer, and the final payment is capped at the outstanding balance plus interest so the simulated balance reaches zero.
+- **Effective APR including fees.** Let \(P_f=P-F\) be the net cash received after upfront fee \(F\), and \(A\) the computed EMI. The monthly effective rate \(q\) solves
+
+  $$
+  P_f=\sum_{k=1}^{n}\frac{A}{(1+q)^k}
+  =\frac{A\bigl(1-(1+q)^{-n}\bigr)}{q},\quad q>0.
+  $$
+
+  The code finds this rate by bisection for 80 iterations and reports the nominal annualised rate \(12q\) in basis points (rather than the compounded effective annual rate \((1+q)^{12}-1\)). If net proceeds or the EMI are non-positive, the implementation falls back to the stated APR.
+- **Debt-to-income ratio (DTI).** For new EMI \(A_n\), existing monthly minimums \(M\), and average monthly income \(I>0\),
+
+  $$
+  \operatorname{DTI}(\%)=100\,\frac{A_n+M}{I}.
+  $$
+
+  The UI classifies DTI up to 36% as healthy, above 36% through 43% as stretched, and above 43% as risky. These are product heuristics, not lender approval criteria.
+- **Borrowing room.** For threshold \(p\in\{0.36,0.43\}\), monthly payment room is \(R_p=\max(0,\lfloor pI\rfloor-M)\). `maxPrincipal` inverts the EMI expression and steps down until the rounded EMI is no greater than \(R_p\).
 - **Pay debt or invest?** A debt is "pay first" when its APR exceeds the plan's after-tax expected return. The same monthly amount is simulated both ways for the same duration (fair comparison).
 - **Taking a loan** flips the offer from `considering` to `taken` with a conditional update. It also creates the debt, with the EMI as its minimum payment, in the same transaction, so a double click cannot create two debts. The sandbox run checks this (second attempt: 409).
 
@@ -186,13 +313,21 @@ The planner (`planGoal` in `src/server/ai/tools.ts`) works from the user's real 
 - Political stability (World Bank WGI, −2.5…+2.5) below 0 lowers the return by 0.5% and widens volatility by 2%. Below −1, the figures are 1.5% and 4%.
 - A user-entered return always wins and is labelled.
 
-**Projection.** Monthly compounding of the balance plus contributions in integer minor units. The range is a deterministic lognormal band, with no random simulation:
+**Projection.** The balance is updated monthly using the assumed annual return converted to a monthly rate, with the monthly contribution added after growth. With annual return \(R\), monthly contribution \(C\), and current balance \(B_{m-1}\), the baseline recurrence is
 
-```
-P10 / P90 = median × exp(∓ 1.2816 × σ × √T_w)
-```
+$$
+B_m=\operatorname{round}\!\left(B_{m-1}\left(1+\frac{R}{12}\right)\right)+C,
+$$
 
-Here σ is the yearly volatility and T_w is the contribution-weighted time invested. The projection also gives the value in today's money (divided by the cumulative inflation index) and in USD terms (the currency's yearly depreciation trend).
+where the code uses the annual rate in basis points and rounds each balance update to integer minor units. The displayed range is a deterministic lognormal-style band, not a Monte Carlo simulation:
+
+$$
+P_{10}=B_m e^{-1.2816\sigma\sqrt{T_w}},\qquad
+P_{50}=B_m,\qquad
+P_{90}=B_m e^{1.2816\sigma\sqrt{T_w}}.
+$$
+
+Here \(\sigma\) is the assumed annual volatility as a decimal, and \(T_w\) is the implementation's contribution-weighted time invested in years. The factor 1.2816 is the standard-normal 90th-percentile quantile used for a symmetric central 80% band. Because the volatility is a fixed risk-profile assumption and the model is deterministic, these bounds are illustrative scenario ranges, not calibrated coverage probabilities. The projection also divides by the cumulative inflation index to estimate value in today's money and multiplies by the currency-trend index for its USD-trend-adjusted view.
 
 **Stress tests.** Seven fixed scenarios: regional conflict or war, sanctions and capital controls, oil shock, global rate hikes, local currency crash, political instability, global recession. Each one sets:
 - an immediate shock, scaled by the plan's exposure (0.35 / 0.70 / 1.0 by risk);
@@ -208,9 +343,9 @@ The reported stress loss is the worst first-year gap against the unstressed path
 - gold, US bonds, international bonds, T-bills (cash).
 
 **Statistics per fund** (`computeStats`), from 10 years of monthly closes:
-- annualised returns over 1, 3, 5 and 10 years: `(P_end / P_start)^(1/years) − 1`, accepting a series up to 3 months short;
-- volatility: the standard deviation of monthly returns × √12;
-- maximum drawdown: the worst fall from a running peak.
+- **Annualised return.** For a valid positive start price \(P_0\), end price \(P_n\), and \(n\) monthly intervals, \(R_{\mathrm{ann}}=(P_n/P_0)^{12/n}-1\). A history up to three months shorter than the requested window may be accepted and annualised over its observed span.
+- **Annualised volatility.** For monthly returns \(r_1,\ldots,r_n\), the code computes their sample standard deviation \(s_r\) and reports \(\sigma_{\mathrm{ann}}=s_r\sqrt{12}\), provided at least 12 monthly returns exist.
+- **Maximum drawdown.** If \(P_t\) is a price and \(H_t=\max_{u\leq t}P_u\) its running peak, the recorded maximum drawdown is \(\min_t(P_t/H_t-1)\). These are historical descriptive statistics, not forecasts.
 
 **Five mixes.** Each starts from a base split of shares, bonds, gold and cash for the risk level, then applies its own tilt:
 
@@ -232,7 +367,13 @@ The reported stress loss is the worst first-year gap against the unstressed path
 
 1. **Which banks exist.** A Wikidata SPARQL query starts from 10 bank types and only then filters by country (`hint:Query hint:optimizer "None"`). This takes 1–3 s, where the naive subclass walk timed out at 60 s for the US, India, Germany and the UK. It excludes defunct banks. A bank whose parent organisation is in another country is labelled the **local arm of an international bank**. A bundled snapshot (158 countries, `scripts/fetch-banks.mts`) is used whenever the live query does not answer within 2.5 s.
 2. **News signal.** GDELT headlines from the last 30 days that name the bank, scored with a small, transparent lexicon. Words such as *fraud, penalty, losses, probe* count −1; *profit, expansion, award, partnership* count +1.
-3. **Ranking score:** `2·log2(1 + fame) + min(articles, 6) + 1.5·signal + (local ? 1 : 0)`, where *fame* is the number of Wikipedia language editions.
+3. **Ranking score.** The deterministic score is
+
+   $$
+   S=2\log_2(1+f)+\min(a,6)+1.5s+\mathbb{1}_{\mathrm{local}},
+   $$
+
+   where \(f\) is the number of Wikipedia language editions, \(a\) is the count of matching articles (capped at six), \(s\) is the lexicon-derived headline signal, and \(\mathbb{1}_{\mathrm{local}}=1\) for a local bank and 0 otherwise.
    - **Caution:** the worst headline ≤ −2, or ≤ −1 with a negative total.
    - **Worth comparing:** the top three of the rest.
    - Every pick carries its reasons.
@@ -257,7 +398,13 @@ The reported stress loss is the worst first-year gap against the unstressed path
 ### 3.10 Partner offers near you (`src/components/NearbyOffers.tsx`, `src/server/repos/offers.ts`)
 
 - **Visibility:** an offer is shown only when its status is `live`, today is between its start and end dates, and an admin verified it in the last 90 days.
-- **Location stays on the device:** the browser asks for location only on a click (or if permission was already granted). It computes the great-circle distance with the haversine formula, `d = 2R·asin(√(sin²(Δφ/2) + cos φ1 cos φ2 sin²(Δλ/2)))` with R = 6,371 km, and sorts nearest first. The server sees only the country.
+- **Location stays on the device:** the browser asks for location only on a click (or if permission was already granted). It computes great-circle distance with the haversine formula
+
+  $$
+  d=2R\arcsin\!\left(\sqrt{\sin^2\!\left(\frac{\Delta\varphi}{2}\right)+\cos\varphi_1\cos\varphi_2\sin^2\!\left(\frac{\Delta\lambda}{2}\right)}\right),
+  $$
+
+  where \(R=6{,}371\) km, \(\varphi_1,\varphi_2\) are latitudes in radians and \(\Delta\varphi,\Delta\lambda\) are latitude and longitude differences in radians. Results are sorted nearest first. The server receives only the country.
 - **Disclosure:** every card shows its relationship (Partner, Sponsored or Ad). Sample content is marked "Sample: not a real partner". Investment cards state they are not financial advice. Links carry only `utm_source=wealthpilot`.
 - **Sponsor statistics:** anonymous daily counters, incremented with an atomic `upsert … increment` (verified: two simultaneous clicks count 2). No user id and no location are stored.
 
@@ -265,7 +412,13 @@ The reported stress loss is the worst first-year gap against the unstressed path
 
 - **Rate limiter** (`src/server/rateLimit.ts`): a fixed window kept in Postgres, implemented as one atomic `INSERT … ON CONFLICT DO UPDATE` that resets the counter when the window has expired. It needs no shared memory, so it holds across processes. Keys are `scope:HMAC(identifier)`.
 - **Audit chain** (`src/server/audit.ts`):
-  - Each write inserts `checksumAfter = SHA-256(checksumBefore | userId | eventType | actor | details | createdAt)` in the same transaction as the change.
+  - Each write inserts a chained digest in the same transaction as the change:
+
+    $$
+    h_i=\operatorname{SHA256}(h_{i-1}\,|\,u_i\,|\,e_i\,|\,a_i\,|\,d_i\,|\,t_i),
+    $$
+
+    where \(h_{i-1}\) is the previous checksum and \(u_i,e_i,a_i,d_i,t_i\) represent the user id, event type, actor, event details and timestamp fields. The vertical bars denote the implementation's canonical field concatenation, not a mathematical OR operation.
   - A per-user `pg_advisory_xact_lock` serialises concurrent writes, so the chain never forks.
   - Timestamps are strictly increasing.
   - The sandbox run recomputed 29 events end to end and found the chain intact.
@@ -374,3 +527,26 @@ Server-side design choices that keep the work small:
 - verified email and MFA;
 - a licensed market-data feed;
 - covariance-based mix risk.
+
+
+## Team Joker
+
+**Md. Rezwanur Rahman Utshaw**  
+*Department of Industrial Engineering and Management*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
+
+**Gazi Faysal Jubayer**  
+*Department of Mechanical Engineering*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
+
+**Aseer Awsaf**  
+*Department of Textile Engineering*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
+
+**Salman Farshi Alam**  
+*Department of Textile Engineering*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
+
+**Sanjid Hasan**  
+*Department of Electrical and Electronic Engineering*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
