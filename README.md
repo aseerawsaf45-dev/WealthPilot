@@ -7,11 +7,11 @@
 <h1 align="center">WealthPilot</h1>
 
 <p align="center">
-  A Personal Finance and Wealth Management Workspace
+  **A personal finance workspace with exact money, a grounded AI copilot, a debt and wealth planner, and location-aware partner offers.**
 </p>
 
 <p align="center">
-  Built for the Shenzhen International FinTech Competition 2026
+  Built for the Shenzhen International FinTech Competition 2026.
 </p>
 
 <p align="center">
@@ -26,12 +26,11 @@
 </p>
 
 ---
-**A personal finance workspace with exact money, a grounded AI copilot, a debt and wealth planner, and location-aware partner offers.**
-Built for the Shenzhen International FinTech Competition 2026.
+
 
 | | |
 |---|---|
-| Live application | <!-- meta:liveUrl -->to be added<!-- /meta --> |
+| Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
 | Team | <!-- meta:team -->WealthPilot Team<!-- /meta --> |
 | Documentation | [Technical documentation](docs/TECHNICAL_DOCUMENTATION.md) · [Deployment](docs/DEPLOYMENT.md) · [Test cases](docs/TEST_CASES.md) · [Sandbox operation logs](docs/SANDBOX_OPERATION_LOG.md) |
