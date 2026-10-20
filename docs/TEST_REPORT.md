@@ -266,4 +266,4 @@ No test is failing. Known limitations (design gaps, not regressions) are ranked 
 |---|---|---|
 | Test lead | | 2026-10-20 |
 | Security review | | 2026-10-20 |
-| Team | Team Joker | 2026-10-20 |
+| Team | Joker | 2026-10-20 |
