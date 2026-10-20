@@ -1,4 +1,3 @@
-# WealthPilot
 <p align="center">
   <img src="public/favicon.png"
        alt="WealthPilot Logo"
