@@ -5,11 +5,7 @@
 | | |
 |---|---|
 | Product | WealthPilot: a personal finance workspace with a grounded AI copilot, debt and wealth planner, and partner offers |
-<<<<<<< HEAD
-| Team | <!-- meta:team -->[Team Joker](https://github.com/aseerawsaf45-dev/WealthPilot#team-joker)<!-- /meta --> |
-=======
-| Team | <!-- meta:team -->Team Joker<!-- /meta --> |
->>>>>>> 8d5173d82a1f3fe602bc28f3063ce422c36253f1
+| Team | <!-- meta:team -->Joker<!-- /meta --> |
 | Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
 | Companion documents | README and deployment guide (deliverable 04), test cases (`docs/TEST_CASES.md`), sandbox operation logs (deliverable 06) |
@@ -139,7 +135,7 @@ WealthPilot stores monetary values as integer minor units rather than binary flo
 **Minor-unit representation.** For currency \(c\), let \(d_c\) be its minor-unit exponent and \(A\) the user-entered amount in major units. The intended representation is
 
 $$
-M_c = \operatorname{round}_{\text{half-away-from-zero}}\!\left(A\,10^{d_c}\right).
+M_c = \mathrm{round}_{\mathrm{halfAwayFromZero}}\!\left(A\,10^{d_c}\right)
 $$
 
 Here, \(M_c\) is an integer count of minor units. The actual parser (`toMinor` in `src/lib/money.ts`) parses decimal text using string arithmetic, pads or truncates fractional digits to the currency exponent, and rounds using the next digit. This avoids relying on binary floating-point arithmetic to parse a decimal string. Unparseable inputs and values outside JavaScript's safe-integer range return the documented fallback rather than being persisted as an arbitrary amount.
@@ -147,7 +143,7 @@ Here, \(M_c\) is an integer count of minor units. The actual parser (`toMinor` i
 **Derived account balance.** Let \(O_i\) be account \(i\)'s opening balance and let \(T_i\) be its transactions. Its current ledger balance is derived as
 
 $$
-B_i = O_i + \sum_{t\in T_i,\;\operatorname{status}(t)\ne\text{VOID}} a_t,
+B_i = O_i + \sum_{t\in T_i,\;\mathrm{status}(t)\ne\mathrm{VOID}} a_t
 $$
 
 where \(a_t\) is the signed transaction amount in the account's currency. The ledger repositories (`listAccounts` and `accountWithBalance` in `src/server/repos/ledger.ts`) calculate this value; they do not maintain a separately mutable balance field. Setting a balance to target \(X\) creates an opening-balance adjustment equal to \(X-\sum_t a_t\) for the applicable non-VOID transactions.
@@ -155,7 +151,7 @@ where \(a_t\) is the signed transaction amount in the account's currency. The le
 **Split conservation.** For a transaction amount \(a\) divided into \(n\) category splits with amounts \(s_1,\ldots,s_n\), the invariant is
 
 $$
-\sum_{j=1}^{n}s_j=a.
+\sum_{j=1}^{n}s_j=a
 $$
 
 `validateSplitPreservation` in `src/lib/money.ts` checks this equality exactly in minor units. A non-zero difference is a validation failure; no tolerance is applied.
@@ -163,10 +159,10 @@ $$
 **Foreign-exchange conversion.** Rates in `src/lib/fx.ts` are stored as integer strings scaled by \(S=10^9\), with \(r_c\) denoting units of currency \(c\) per one unit of the snapshot base currency. For a source amount \(M_f\), source currency \(f\), target currency \(t\), and exponents \(d_f,d_t\), conversion is
 
 $$
-M_t=\operatorname{round}_{\text{even}}\!\left(\frac{M_f\,r_t\,10^{d_t}}{r_f\,10^{d_f}}\right),
+M_t=\mathrm{round}_{\mathrm{even}}\!\left(\frac{M_f\,r_t\,10^{d_t}}{r_f\,10^{d_f}}\right)
 $$
 
-where \(\operatorname{round}_{\text{even}}\) is round-half-to-even integer division. Same-currency conversion returns the original amount; if a rate is unavailable, conversion returns `null` and the total reports the omitted currency rather than silently mixing currencies. Cross-currency totals are estimates tied to the dated rate snapshot and should be labelled as such.
+where \(\mathrm{round}_{\mathrm{even}}\) is round-half-to-even integer division. Same-currency conversion returns the original amount; if a rate is unavailable, conversion returns `null` and the total reports the omitted currency rather than silently mixing currencies. Cross-currency totals are estimates tied to the dated rate snapshot and should be labelled as such.
 
 **Rounding and deletion.** The string parser uses half-away-from-zero rounding for entered decimal text; FX conversion uses half-to-even integer division. These are distinct, intentional boundaries. Deleting a transaction changes its status to `VOID`, preserving the audit record while excluding that row from the derived balance. The sandbox evidence includes rejection of an invalid floating-point amount at the API boundary.
 
@@ -176,7 +172,7 @@ where \(\operatorname{round}_{\text{even}}\) is round-half-to-even integer divis
 2. **Fingerprint:** the row fingerprint is computed from the concatenation of date, lower-cased merchant, amount, and occurrence-in-file index:
 
    $$
-   F=\operatorname{SHA256}(\text{date}\,|\,\operatorname{lower}(\text{merchant})\,|\,\text{amount}\,|\,\text{occurrence}).
+   F=\mathrm{SHA256}(\mathrm{date}\,|\,\mathrm{lower}(\mathrm{merchant})\,|\,\mathrm{amount}\,|\,\mathrm{occurrence})
    $$
 
    The occurrence index keeps two otherwise identical same-day purchases distinct, while re-importing the same file reproduces the same fingerprints.
@@ -197,15 +193,15 @@ where \(\operatorname{round}_{\text{even}}\) is round-half-to-even integer divis
 **Cash-flow forecast formulation.** For horizon \(H\in\{30,60,90\}\) days, the implementation counts recurring income events as \(I_H\), scheduled bills and recurring outflows as \(L_H\), and estimates everyday spending by scaling the median rolling 30-day everyday-spending total \(E_{30}\):
 
 $$
-E_H=\operatorname{round}\!\left(E_{30}\frac{H}{30}\right),\qquad
-\widehat{B}_H=B_0+I_H-L_H-E_H.
+E_H=\mathrm{round}\!\left(E_{30}\frac{H}{30}\right),\qquad
+\widehat{B}_H=B_0+I_H-L_H-E_H
 $$
 
 The displayed range uses historical spread terms \(U\) and \(D\), derived from the 90th and 10th percentiles of rolling 30-day spending totals over up to 180 days:
 
 $$
-B_H^{\mathrm{low}}=\widehat{B}_H-\operatorname{round}\!\left(U\frac{H}{30}\right),\qquad
-B_H^{\mathrm{high}}=\widehat{B}_H+\operatorname{round}\!\left(D\frac{H}{30}\right).
+B_H^{\mathrm{low}}=\widehat{B}_H-\mathrm{round}\!\left(U\frac{H}{30}\right),\qquad
+B_H^{\mathrm{high}}=\widehat{B}_H+\mathrm{round}\!\left(D\frac{H}{30}\right)
 $$
 
 These endpoints are labelled P10 and P90 in the interface, but they are heuristic bounds constructed by scaling empirical spending spreads; they are not calibrated probabilistic coverage intervals. Forecasting is withheld unless at least 60 days of transaction history are available. The implementation also estimates the first day the expected balance falls below zero by walking scheduled events day by day.
@@ -213,14 +209,14 @@ These endpoints are labelled P10 and P90 in the interface, but they are heuristi
 For unusual-spending detection, the category median and median absolute deviation (MAD) are computed from eligible historical expenses:
 
 $$
-\widetilde{x}=\operatorname{median}(x_1,\ldots,x_n),\qquad
-\operatorname{MAD}=\operatorname{median}\bigl(|x_i-\widetilde{x}|\bigr).
+\widetilde{x}=\mathrm{median}(x_1,\ldots,x_n),\qquad
+\mathrm{MAD}=\mathrm{median}\bigl(|x_i-\widetilde{x}|\bigr)
 $$
 
-When \(\operatorname{MAD}>0\), the modified z-score for a candidate expense \(x\) is
+When \(\mathrm{MAD}>0\), the modified z-score for a candidate expense \(x\) is
 
 $$
-z=\frac{0.6745\,(x-\widetilde{x})}{\operatorname{MAD}}.
+z=\frac{0.6745\,(x-\widetilde{x})}{\mathrm{MAD}}
 $$
 
 The implementation flags the candidate only when \(z>3.5\) and the category has at least eight earlier expenses spanning at least 60 days. When MAD is zero, the fallback is \(x\geq 2\widetilde{x}\); no z-score is reported for that fallback. These are deterministic heuristics, not a diagnosis of fraud or a statistical guarantee.
@@ -228,22 +224,22 @@ The implementation flags the candidate only when \(z>3.5\) and the category has 
 For recurring detection, let \(g\) be the median gap between distinct payment dates and \(d_c\) the nominal gap for cadence \(c\). The cadence test is
 
 $$
-|g-d_c|\leq 0.2d_c,
+|g-d_c|\leq 0.2d_c
 $$
 
-with nominal gaps of 7, 14, 30.4, 91.3, and 365.25 days for weekly, biweekly, monthly, quarterly, and annual cadence, respectively. The amount-stability coefficient is the population standard deviation divided by the mean, \(\operatorname{CV}=s/\bar{x}\). A series passes the amount-stability test when \(\operatorname{CV}<0.15\) for all amounts or, where at least four observations exist, for the earlier amounts excluding the latest observation.
+with nominal gaps of 7, 14, 30.4, 91.3, and 365.25 days for weekly, biweekly, monthly, quarterly, and annual cadence, respectively. The amount-stability coefficient is the population standard deviation divided by the mean, \(\mathrm{CV}=s/\bar{x}\). A series passes the amount-stability test when \(\mathrm{CV}<0.15\) for all amounts or, where at least four observations exist, for the earlier amounts excluding the latest observation.
 
 **Goal completion estimate.** For remaining goal amount \(R\) and positive monthly saving rate \(M\), the estimated number of months is
 
 $$
-N=\left\lceil\frac{R}{M}\right\rceil.
+N=\left\lceil\frac{R}{M}\right\rceil
 $$
 
 The sensitivity window recomputes the estimate at \(1.2M\) and \(0.8M\):
 
 $$
 N_{\mathrm{early}}=\left\lceil\frac{R}{1.2M}\right\rceil,\qquad
-N_{\mathrm{late}}=\left\lceil\frac{R}{0.8M}\right\rceil.
+N_{\mathrm{late}}=\left\lceil\frac{R}{0.8M}\right\rceil
 $$
 
 If \(R\leq0\), the estimate is zero; if \(M\leq0\) while money remains, the completion time is reported as unavailable (“never at this rate”). For a target date, the implementation estimates months remaining using 30.44 days per month and computes the required monthly amount by rounding up.
@@ -257,19 +253,19 @@ The planner (`planGoal` in `src/server/ai/tools.ts`) uses the user's recent comp
 Let \(I\) and \(E\) be average monthly income and expenses over up to three recent complete months. The estimated monthly surplus is
 
 $$
-S=I-E.
+S=I-E
 $$
 
 For each other dated goal \(g\), let \(R_g\) be its remaining amount and \(m_g\) the months remaining. The uncommitted monthly surplus is
 
 $$
-F=S-\sum_g\left\lceil\frac{R_g}{m_g}\right\rceil,\qquad C=\left\lfloor\frac{\max(0,F)}{2}\right\rfloor,
+F=S-\sum_g\left\lceil\frac{R_g}{m_g}\right\rceil,\qquad C=\left\lfloor\frac{\max(0,F)}{2}\right\rfloor
 $$
 
 where \(C\) is the planner's “comfortable” monthly saving rate; half of the uncommitted amount is reserved as a buffer. For the goal being evaluated, with remaining amount \(R\) and \(m\) months left, the required monthly saving is
 
 $$
-Q=\left\lceil\frac{R}{m}\right\rceil.
+Q=\left\lceil\frac{R}{m}\right\rceil
 $$
 
 The verdict is **not reachable** when \(F\leq0\) or \(Q>F\), **on track** when \(Q\leq C\), and **stretch** otherwise. These classifications depend on historical averages and entered dates; they are not guarantees of future affordability. The implementation also checks edge cases such as goals with no positive saving rate.
@@ -279,11 +275,11 @@ The verdict is **not reachable** when \(F\leq0\) or \(Q>F\), **on track** when \
 ### 3.5 Debt payoff and loans (`src/services/debtService.ts`, `src/lib/planning/loans.ts`, `link.ts`)
 
 - **Snowball vs avalanche:** a month-by-month simulation. Interest accrues at APR/12 (rounded to minor units) and minimums are paid. Freed-up minimums from paid-off debts roll into the next target (lowest balance first, or highest APR first). The simulation is capped at 360 months.
-- **Monthly rate.** APR is represented in basis points (\(10{,}000\) bps = 100%). The monthly rate is \(r=\operatorname{APR}_{\mathrm{bps}}/(10{,}000\cdot12)\).
+- **Monthly rate.** APR is represented in basis points (\(10{,}000\) bps = 100%). The monthly rate is \(r=\mathrm{APR}_{\mathrm{bps}}/(10{,}000\cdot12)\).
 - **Equated monthly instalment (EMI).** For principal \(P\), monthly rate \(r\), and \(n\) payments,
 
   $$
-  \operatorname{EMI}=\begin{cases}
+  \mathrm{EMI}=\begin{cases}
   \left\lceil P/n\right\rceil, & r=0,\\[4pt]
   \left\lceil\dfrac{Pr}{1-(1+r)^{-n}}\right\rceil, & r>0.
   \end{cases}
@@ -294,14 +290,14 @@ The verdict is **not reachable** when \(F\leq0\) or \(Q>F\), **on track** when \
 
   $$
   P_f=\sum_{k=1}^{n}\frac{A}{(1+q)^k}
-  =\frac{A\bigl(1-(1+q)^{-n}\bigr)}{q},\quad q>0.
+  =\frac{A\bigl(1-(1+q)^{-n}\bigr)}{q},\quad q>0
   $$
 
   The code finds this rate by bisection for 80 iterations and reports the nominal annualised rate \(12q\) in basis points (rather than the compounded effective annual rate \((1+q)^{12}-1\)). If net proceeds or the EMI are non-positive, the implementation falls back to the stated APR.
 - **Debt-to-income ratio (DTI).** For new EMI \(A_n\), existing monthly minimums \(M\), and average monthly income \(I>0\),
 
   $$
-  \operatorname{DTI}(\%)=100\,\frac{A_n+M}{I}.
+  \mathrm{DTI}(\%)=100\,\frac{A_n+M}{I}
   $$
 
   The UI classifies DTI up to 36% as healthy, above 36% through 43% as stretched, and above 43% as risky. These are product heuristics, not lender approval criteria.
@@ -320,7 +316,7 @@ The verdict is **not reachable** when \(F\leq0\) or \(Q>F\), **on track** when \
 **Projection.** The balance is updated monthly using the assumed annual return converted to a monthly rate, with the monthly contribution added after growth. With annual return \(R\), monthly contribution \(C\), and current balance \(B_{m-1}\), the baseline recurrence is
 
 $$
-B_m=\operatorname{round}\!\left(B_{m-1}\left(1+\frac{R}{12}\right)\right)+C,
+B_m=\mathrm{round}\!\left(B_{m-1}\left(1+\frac{R}{12}\right)\right)+C
 $$
 
 where the code uses the annual rate in basis points and rounds each balance update to integer minor units. The displayed range is a deterministic lognormal-style band, not a Monte Carlo simulation:
@@ -328,7 +324,7 @@ where the code uses the annual rate in basis points and rounds each balance upda
 $$
 P_{10}=B_m e^{-1.2816\sigma\sqrt{T_w}},\qquad
 P_{50}=B_m,\qquad
-P_{90}=B_m e^{1.2816\sigma\sqrt{T_w}}.
+P_{90}=B_m e^{1.2816\sigma\sqrt{T_w}}
 $$
 
 Here \(\sigma\) is the assumed annual volatility as a decimal, and \(T_w\) is the implementation's contribution-weighted time invested in years. The factor 1.2816 is the standard-normal 90th-percentile quantile used for a symmetric central 80% band. Because the volatility is a fixed risk-profile assumption and the model is deterministic, these bounds are illustrative scenario ranges, not calibrated coverage probabilities. The projection also divides by the cumulative inflation index to estimate value in today's money and multiplies by the currency-trend index for its USD-trend-adjusted view.
@@ -374,7 +370,7 @@ The reported stress loss is the worst first-year gap against the unstressed path
 3. **Ranking score.** The deterministic score is
 
    $$
-   S=2\log_2(1+f)+\min(a,6)+1.5s+\mathbb{1}_{\mathrm{local}},
+   S=2\log_2(1+f)+\min(a,6)+1.5s+\mathbb{1}_{\mathrm{local}}
    $$
 
    where \(f\) is the number of Wikipedia language editions, \(a\) is the count of matching articles (capped at six), \(s\) is the lexicon-derived headline signal, and \(\mathbb{1}_{\mathrm{local}}=1\) for a local bank and 0 otherwise.
@@ -405,7 +401,7 @@ The reported stress loss is the worst first-year gap against the unstressed path
 - **Location stays on the device:** the browser asks for location only on a click (or if permission was already granted). It computes great-circle distance with the haversine formula
 
   $$
-  d=2R\arcsin\!\left(\sqrt{\sin^2\!\left(\frac{\Delta\varphi}{2}\right)+\cos\varphi_1\cos\varphi_2\sin^2\!\left(\frac{\Delta\lambda}{2}\right)}\right),
+  d=2R\arcsin\!\left(\sqrt{\sin^2\!\left(\frac{\Delta\varphi}{2}\right)+\cos\varphi_1\cos\varphi_2\sin^2\!\left(\frac{\Delta\lambda}{2}\right)}\right)
   $$
 
   where \(R=6{,}371\) km, \(\varphi_1,\varphi_2\) are latitudes in radians and \(\Delta\varphi,\Delta\lambda\) are latitude and longitude differences in radians. Results are sorted nearest first. The server receives only the country.
@@ -419,7 +415,7 @@ The reported stress loss is the worst first-year gap against the unstressed path
   - Each write inserts a chained digest in the same transaction as the change:
 
     $$
-    h_i=\operatorname{SHA256}(h_{i-1}\,|\,u_i\,|\,e_i\,|\,a_i\,|\,d_i\,|\,t_i),
+    h_i=\mathrm{SHA256}(h_{i-1}\,|\,u_i\,|\,e_i\,|\,a_i\,|\,d_i\,|\,t_i)
     $$
 
     where \(h_{i-1}\) is the previous checksum and \(u_i,e_i,a_i,d_i,t_i\) represent the user id, event type, actor, event details and timestamp fields. The vertical bars denote the implementation's canonical field concatenation, not a mathematical OR operation.
@@ -482,7 +478,7 @@ The Permissions-Policy denies the camera, microphone and payment APIs, and limit
 
 ### 4.6 Known risks and planned fixes
 
-We list these openly; none is hidden by the tests. The full ranked risk register (20 risks, including dependency-audit and live-site findings) and the permission-tier implementation are in the Security Self-Assessment Report (deliverable 05).
+We list these openly; none is hidden by the tests.
 
 | # | Risk | Impact | Planned fix |
 |---|---|---|---|
