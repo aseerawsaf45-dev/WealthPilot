@@ -25,7 +25,7 @@
   </a>
 </p>
 
----
+---+
 
 
 | | |
@@ -62,6 +62,8 @@
 | ![Overview](submission/evidence/screenshots/01-overview.png) | ![Copilot](submission/evidence/screenshots/05-copilot-proposal.png) |
 | **Loan offers compared** | **Partner offers near you** |
 | ![Loans](submission/evidence/screenshots/03-planner-loans.png) | ![Near you](submission/evidence/screenshots/06-near-you.png) |
+| **Learn Finance Concepts**|
+| ![learn](submission/evidence/screenshots/07-learn-finance.png) |
 
 ## Tech stack
 
