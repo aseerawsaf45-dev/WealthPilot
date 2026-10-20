@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" font-family="Arial, Helvetica, sans-serif">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker></defs>
+  <rect width="1600" height="700" fill="#fff"/>
+  <text x="800" y="44" text-anchor="middle" font-size="28" font-weight="700" fill="#0F172A">AI copilot: the server computes, the model only narrates</text>
+  <g font-size="15" fill="#0F172A">
+    <rect x="30" y="90" width="210" height="120" rx="12" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="135" y="122" text-anchor="middle" font-weight="700">User message</text>
+    <text x="135" y="150" text-anchor="middle">"How much did I spend</text>
+    <text x="135" y="172" text-anchor="middle">on dining this month?"</text>
+    <rect x="290" y="90" width="230" height="120" rx="12" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="405" y="122" text-anchor="middle" font-weight="700">Rules first (no LLM)</text>
+    <text x="405" y="150" text-anchor="middle">rulesCommands() for orders</text>
+    <text x="405" y="172" text-anchor="middle">routeIntent() for questions</text>
+    <text x="405" y="194" text-anchor="middle">→ tool calls</text>
+    <rect x="570" y="90" width="260" height="120" rx="12" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/>
+    <text x="700" y="122" text-anchor="middle" font-weight="700">Server tools compute facts</text>
+    <text x="700" y="150" text-anchor="middle">integer minor units, periods,</text>
+    <text x="700" y="172" text-anchor="middle">FX-converted with a note</text>
+    <text x="700" y="194" text-anchor="middle">→ facts f1..fN + template</text>
+    <rect x="880" y="90" width="300" height="120" rx="12" fill="#FAF5FF" stroke="#A855F7" stroke-width="2"/>
+    <text x="1030" y="122" text-anchor="middle" font-weight="700">LLM (only if user consented)</text>
+    <text x="1030" y="150" text-anchor="middle">sees fact LABELS, never values;</text>
+    <text x="1030" y="172" text-anchor="middle">writes prose with {{f1}}, {{f2}}</text>
+    <text x="1030" y="194" text-anchor="middle">Groq ZDR · Gemini backup</text>
+    <rect x="1230" y="90" width="340" height="120" rx="12" fill="#F1F5F9" stroke="#64748B" stroke-width="2"/>
+    <text x="1400" y="122" text-anchor="middle" font-weight="700">Grounding check</text>
+    <text x="1400" y="150" text-anchor="middle">any digit or number word outside</text>
+    <text x="1400" y="172" text-anchor="middle">a placeholder, or unknown id →</text>
+    <text x="1400" y="194" text-anchor="middle">reject, use server template</text>
+  </g>
+  <g stroke="#334155" stroke-width="2.5" marker-end="url(#a)">
+    <line x1="240" y1="150" x2="288" y2="150"/><line x1="520" y1="150" x2="568" y2="150"/><line x1="830" y1="150" x2="878" y2="150"/><line x1="1180" y1="150" x2="1228" y2="150"/>
+    <line x1="1400" y1="210" x2="1400" y2="258"/>
+  </g>
+  <rect x="1150" y="262" width="420" height="80" rx="12" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+  <text x="1360" y="294" text-anchor="middle" font-size="16" font-weight="700" fill="#065F46">Answer: server fills {{fN}} with formatted figures</text>
+  <text x="1360" y="320" text-anchor="middle" font-size="15" fill="#065F46">every number in the reply came from a server tool</text>
+  <path d="M405 210 C 405 250, 405 250, 405 262" stroke="#334155" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+  <text x="420" y="246" font-size="14" fill="#334155">no match + AI on</text>
+  <g font-size="15" fill="#0F172A">
+    <rect x="290" y="264" width="300" height="78" rx="12" fill="#FAF5FF" stroke="#A855F7" stroke-width="2"/>
+    <text x="440" y="294" text-anchor="middle" font-weight="700">LLM picks tools (JSON)</text>
+    <text x="440" y="318" text-anchor="middle">args Zod-validated; dates clamped</text>
+  </g>
+  <line x1="590" y1="303" x2="640" y2="214" stroke="#334155" stroke-width="2.5" marker-end="url(#a)"/>
+
+  <text x="30" y="400" font-size="20" font-weight="700" fill="#0F172A">Commands ("pay Netflix", "apply the growth mix to Kids education", "take the Sonali Bank loan")</text>
+  <g font-size="15" fill="#0F172A">
+    <rect x="30" y="420" width="300" height="120" rx="12" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="180" y="450" text-anchor="middle" font-weight="700">resolveCommand()</text>
+    <text x="180" y="476" text-anchor="middle">names matched to the user's</text>
+    <text x="180" y="498" text-anchor="middle">own records; amounts must be</text>
+    <text x="180" y="520" text-anchor="middle">written in the message</text>
+    <rect x="380" y="420" width="300" height="120" rx="12" fill="#FEF9C3" stroke="#EAB308" stroke-width="2"/>
+    <text x="530" y="450" text-anchor="middle" font-weight="700">Proposal card</text>
+    <text x="530" y="476" text-anchor="middle">plain-language summary;</text>
+    <text x="530" y="498" text-anchor="middle">deletes flagged destructive;</text>
+    <text x="530" y="520" text-anchor="middle">nothing saved yet</text>
+    <rect x="730" y="420" width="300" height="120" rx="12" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="880" y="450" text-anchor="middle" font-weight="700">User presses Confirm</text>
+    <text x="880" y="476" text-anchor="middle">op must be in ASSISTANT_OPS;</text>
+    <text x="880" y="498" text-anchor="middle">runs the same FinanceContext</text>
+    <text x="880" y="520" text-anchor="middle">action as the app's buttons</text>
+    <rect x="1080" y="420" width="490" height="120" rx="12" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/>
+    <text x="1325" y="450" text-anchor="middle" font-weight="700">Normal API route</text>
+    <text x="1325" y="476" text-anchor="middle">session, Zod, tenant scope, audit, idempotency</text>
+    <text x="1325" y="498" text-anchor="middle">apply exactly as for a manual action;</text>
+    <text x="1325" y="520" text-anchor="middle">the model never gets write or SQL access</text>
+  </g>
+  <g stroke="#334155" stroke-width="2.5" marker-end="url(#a)">
+    <line x1="330" y1="480" x2="378" y2="480"/><line x1="680" y1="480" x2="728" y2="480"/><line x1="1030" y1="480" x2="1078" y2="480"/>
+  </g>
+  <rect x="30" y="580" width="1540" height="90" rx="12" fill="#FEF2F2" stroke="#FCA5A5"/>
+  <text x="50" y="612" font-size="16" font-weight="700" fill="#991B1B">What never leaves the server</text>
+  <text x="50" y="640" font-size="15" fill="#7F1D1D">raw transaction rows · amounts · account numbers · emails · phone numbers · card numbers (redacted by privacy.ts) · SQL access · write access</text>
+  <text x="50" y="662" font-size="15" fill="#7F1D1D">Model calls require explicit, versioned consent (CURRENT_AI_NOTICE); daily (20) and global per-minute quotas fall back to calculated answers.</text>
+</svg>

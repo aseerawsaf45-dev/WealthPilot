@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" font-family="Arial, Helvetica, sans-serif">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker></defs>
+  <rect width="1600" height="560" fill="#fff"/>
+  <text x="800" y="44" text-anchor="middle" font-size="28" font-weight="700" fill="#0F172A">Request lifecycle of a write (e.g. POST /api/v1/transactions)</text>
+  <g font-size="15" fill="#0F172A">
+    <!-- boxes -->
+    <rect x="30" y="90" width="180" height="150" rx="12" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="120" y="120" text-anchor="middle" font-weight="700">1. handle()</text>
+    <text x="120" y="148" text-anchor="middle">Origin must match</text>
+    <text x="120" y="170" text-anchor="middle">host (CSRF);</text>
+    <text x="120" y="192" text-anchor="middle">errors → generic</text>
+    <text x="120" y="214" text-anchor="middle">message, no leak</text>
+    <rect x="250" y="90" width="180" height="150" rx="12" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="340" y="120" text-anchor="middle" font-weight="700">2. authed()</text>
+    <text x="340" y="148" text-anchor="middle">HMAC cookie valid</text>
+    <text x="340" y="170" text-anchor="middle">AND Session row</text>
+    <text x="340" y="192" text-anchor="middle">live (revocable)</text>
+    <text x="340" y="214" text-anchor="middle">→ userId</text>
+    <rect x="470" y="90" width="180" height="150" rx="12" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="560" y="120" text-anchor="middle" font-weight="700">3. parseBody(Zod)</text>
+    <text x="560" y="148" text-anchor="middle">integer minor units,</text>
+    <text x="560" y="170" text-anchor="middle">ISO codes, lengths,</text>
+    <text x="560" y="192" text-anchor="middle">no card numbers;</text>
+    <text x="560" y="214" text-anchor="middle">unknown keys dropped</text>
+    <rect x="690" y="90" width="180" height="150" rx="12" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="780" y="120" text-anchor="middle" font-weight="700">4. rateLimit()</text>
+    <text x="780" y="148" text-anchor="middle">one atomic upsert</text>
+    <text x="780" y="170" text-anchor="middle">per check; keys</text>
+    <text x="780" y="192" text-anchor="middle">are HMAC hashes</text>
+    <text x="780" y="214" text-anchor="middle">→ 429 Retry-After</text>
+    <rect x="910" y="90" width="200" height="150" rx="12" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/>
+    <text x="1010" y="120" text-anchor="middle" font-weight="700">5. repo (scoped)</text>
+    <text x="1010" y="148" text-anchor="middle">findFirst({ id, userId })</text>
+    <text x="1010" y="170" text-anchor="middle">not found / not yours</text>
+    <text x="1010" y="192" text-anchor="middle">→ 404 (ids never</text>
+    <text x="1010" y="214" text-anchor="middle">confirmed)</text>
+    <rect x="1150" y="90" width="200" height="150" rx="12" fill="#FFF7ED" stroke="#F97316" stroke-width="2"/>
+    <text x="1250" y="120" text-anchor="middle" font-weight="700">6. $transaction</text>
+    <text x="1250" y="148" text-anchor="middle">row write + audit row</text>
+    <text x="1250" y="170" text-anchor="middle">(advisory lock, SHA-256</text>
+    <text x="1250" y="192" text-anchor="middle">chain) commit together</text>
+    <text x="1250" y="214" text-anchor="middle">or roll back together</text>
+    <rect x="1390" y="90" width="180" height="150" rx="12" fill="#F1F5F9" stroke="#64748B" stroke-width="2"/>
+    <text x="1480" y="120" text-anchor="middle" font-weight="700">7. ok(data)</text>
+    <text x="1480" y="148" text-anchor="middle">{ success, data }</text>
+    <text x="1480" y="170" text-anchor="middle">balance re-derived</text>
+    <text x="1480" y="192" text-anchor="middle">Cache-Control:</text>
+    <text x="1480" y="214" text-anchor="middle">no-store</text>
+  </g>
+  <g stroke="#334155" stroke-width="2.5" marker-end="url(#a)">
+    <line x1="210" y1="165" x2="248" y2="165"/><line x1="430" y1="165" x2="468" y2="165"/><line x1="650" y1="165" x2="688" y2="165"/>
+    <line x1="870" y1="165" x2="908" y2="165"/><line x1="1110" y1="165" x2="1148" y2="165"/><line x1="1350" y1="165" x2="1388" y2="165"/>
+  </g>
+  <!-- failures -->
+  <g font-size="15">
+    <text x="30" y="408" font-size="17" font-weight="700" fill="#B91C1C">↑ Where a request stops when a check fails (each one exercised in the sandbox run)</text>
+    <rect x="30" y="320" width="180" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="120" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">403 cross-site</text><text x="120" y="368" text-anchor="middle" fill="#991B1B">~3 ms, no DB work</text>
+    <rect x="250" y="320" width="180" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="340" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">401 no / revoked</text><text x="340" y="368" text-anchor="middle" fill="#991B1B">session</text>
+    <rect x="470" y="320" width="180" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="560" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">400 validation</text><text x="560" y="368" text-anchor="middle" fill="#991B1B">float money, PAN</text>
+    <rect x="690" y="320" width="180" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="780" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">429 rate limited</text><text x="780" y="368" text-anchor="middle" fill="#991B1B">password guessing</text>
+    <rect x="910" y="320" width="200" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="1010" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">404 other tenant</text><text x="1010" y="368" text-anchor="middle" fill="#991B1B">403 non-admin</text>
+    <rect x="1150" y="320" width="200" height="60" rx="10" fill="#FEF2F2" stroke="#FCA5A5"/><text x="1250" y="346" text-anchor="middle" fill="#991B1B" font-weight="700">409 conflict</text><text x="1250" y="368" text-anchor="middle" fill="#991B1B">bill paid twice, loan</text>
+  </g>
+  <g stroke="#FCA5A5" stroke-width="2" stroke-dasharray="6 5">
+    <line x1="120" y1="240" x2="120" y2="318"/><line x1="340" y1="240" x2="340" y2="318"/><line x1="560" y1="240" x2="560" y2="318"/>
+    <line x1="780" y1="240" x2="780" y2="318"/><line x1="1010" y1="240" x2="1010" y2="318"/><line x1="1250" y1="240" x2="1250" y2="318"/>
+  </g>
+  <text x="30" y="452" font-size="16" fill="#334155">Reads follow steps 1–5 and 7. The user id is taken only from the session (step 2); a userId in a body or URL is ignored by the schema.</text>
+  <text x="30" y="480" font-size="16" fill="#334155">Money crosses the boundary as a safe integer of minor units and is stored as BigInt; balances are never written, always derived (opening + live rows).</text>
+  <text x="30" y="508" font-size="16" fill="#334155">Deletes of transactions are a VOID status (audit trail kept); imports are idempotent (SHA-256 fingerprint per row, unique per user) and can be rolled back.</text>
+</svg>

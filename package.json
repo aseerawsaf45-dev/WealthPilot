@@ -22,7 +22,8 @@
     "eval:ai": "tsx scripts/ai-evals.mts",
     "eval:ai:live": "tsx --env-file=.env scripts/ai-live-check.mts",
     "prepare": "git config core.hooksPath .githooks || exit 0",
-    "eval:ai:plan:live": "tsx --env-file=.env scripts/ai-plan-live.mts"
+    "eval:ai:plan:live": "tsx --env-file=.env scripts/ai-plan-live.mts",
+    "docs:build": "node scripts/build-submission-docs.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -52,6 +53,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "docx": "^9.13.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",
