@@ -133,8 +133,11 @@ export function PageInsights({ segment, scope, limit = 4, className = '' }: Prop
         case 'filter_transactions':
           emitUi({ type: 'filter-transactions', query: action.query });
           break;
+        case 'review_budget':
+          emitUi({ type: 'review-budget', category: action.category });
+          break;
       }
-      if (action.type !== 'open_tab' && action.type !== 'filter_transactions') setDone((d) => new Set(d).add(insight.id));
+      if (action.type !== 'open_tab' && action.type !== 'filter_transactions' && action.type !== 'review_budget') setDone((d) => new Set(d).add(insight.id));
     } finally {
       setBusy(null);
       setConfirming(null);

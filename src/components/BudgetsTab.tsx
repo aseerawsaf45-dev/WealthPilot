@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PageInsights } from './PageInsights';
+import { BudgetReviewDialog } from './BudgetReviewDialog';
 import { useFinance } from '../context/FinanceContext';
 import { BudgetCategory } from '../types/finance';
 import { formatMoney, displaySymbol, dollarsToCents, fromMinor, calculateBudgetPace } from '../lib/money';
 import { BudgetPacingGaugeChart } from './InteractiveCharts';
 import { RowActions } from './RowActions';
+import { onUi, takePendingBudgetReview } from '../lib/uiBus';
 import {
   PieChart,
   Plus,
@@ -15,12 +17,22 @@ import {
   AlertTriangle,
   CheckCircle,
   X,
+  Sparkles,
 } from 'lucide-react';
 
 export function BudgetsTab() {
   const { budgets, addBudget, updateBudget, deleteBudget } = useFinance();
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [reviewCategory, setReviewCategory] = useState<string | null>(() => takePendingBudgetReview());
+
+  useEffect(() => {
+    return onUi((e) => {
+      if (e.type === 'review-budget') {
+        setReviewCategory(e.category);
+      }
+    });
+  }, []);
 
   // Form State
   const [category, setCategory] = useState('');
@@ -177,6 +189,22 @@ export function BudgetsTab() {
                   <span>Rollover</span>
                 </label>
               </div>
+
+              {(pace.paceStatus === 'over' || percentUsed >= 85) && (
+                <div className="pt-3 border-t border-dashed border-rose-200/80 flex items-center justify-between">
+                  <span className="text-[11px] text-rose-700 font-medium">
+                    {pace.paceStatus === 'over' ? 'Exceeded budget allocation' : 'Pacing close to limit'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setReviewCategory(b.category)}
+                    className="btn-anim inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-50 to-indigo-50 hover:from-sky-100 hover:to-indigo-100 border border-sky-200 px-2.5 py-1 text-[11px] font-bold text-sky-800 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3 text-sky-600" />
+                    <span>Review with AI</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -252,6 +280,11 @@ export function BudgetsTab() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* AI Budget Review Dialog */}
+      {reviewCategory && (
+        <BudgetReviewDialog category={reviewCategory} onClose={() => setReviewCategory(null)} />
       )}
     </div>
   );

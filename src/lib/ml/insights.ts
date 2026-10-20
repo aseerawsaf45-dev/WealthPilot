@@ -20,6 +20,7 @@ export type Severity = 'good' | 'info' | 'warn' | 'alert';
 export type InsightAction =
   | { type: 'add_bill'; name: string; amountCents: number; frequency: 'weekly' | 'monthly' | 'quarterly' | 'annual'; nextDueDate: string; category: string }
   | { type: 'set_budget'; category: string; allocatedCents: number }
+  | { type: 'review_budget'; category: string }
   | { type: 'recategorize'; items: Array<{ id: string; category: string }> }
   | { type: 'open_tab'; tab: string }
   | { type: 'filter_transactions'; query: string };
@@ -166,10 +167,26 @@ export function buildInsights(input: InsightInput): InsightReport {
 
   // ---- Budgets -------------------------------------------------------------------------
   for (const b of pace.overBudget.slice(0, 2)) {
-    push({ id: `budget-over-${b.category}`, segments: ['budgets', 'overview'], severity: 'alert', title: `${b.category} is over budget`, detail: `${money(b.spentCents)} spent of ${money(b.allocatedCents)} with ${100 - Math.round(month.elapsedPct)}% of the month left.`, method: 'Spent vs budget this month', action: { label: 'Review budget', action: { type: 'open_tab', tab: 'budgets' } } });
+    push({
+      id: `budget-over-${b.category}`,
+      segments: ['budgets', 'overview'],
+      severity: 'alert',
+      title: `${b.category} is over budget`,
+      detail: `${money(b.spentCents)} spent of ${money(b.allocatedCents)} with ${100 - Math.round(month.elapsedPct)}% of the month left.`,
+      method: 'Spent vs budget this month',
+      action: { label: 'Review budget', action: { type: 'review_budget', category: b.category } },
+    });
   }
   for (const b of pace.atRisk.slice(0, 2)) {
-    push({ id: `budget-risk-${b.category}`, segments: ['budgets'], severity: 'warn', title: `${b.category} is on pace to go over`, detail: `At this pace you'll spend about ${money(b.projectedCents)} against a ${money(b.allocatedCents)} budget.`, method: 'Spend so far ÷ share of month elapsed' });
+    push({
+      id: `budget-risk-${b.category}`,
+      segments: ['budgets'],
+      severity: 'warn',
+      title: `${b.category} is on pace to go over`,
+      detail: `At this pace you'll spend about ${money(b.projectedCents)} against a ${money(b.allocatedCents)} budget.`,
+      method: 'Spend so far ÷ share of month elapsed',
+      action: { label: 'Review budget', action: { type: 'review_budget', category: b.category } },
+    });
   }
   // Suggest budgets for big categories that have none (3-month median-based average).
   if (averages.monthsUsed >= 2) {

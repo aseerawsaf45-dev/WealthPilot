@@ -56,6 +56,7 @@ function WealthPilotApp() {
     () =>
       onUi((e) => {
         if (e.type === 'navigate' && TABS.includes(e.tab)) setActiveTab(e.tab);
+        if (e.type === 'review-budget') setActiveTab('budgets');
         if (e.type === 'ask-assistant') {
           setAssistantPrefill({ text: e.question || (e.scope ? `/${e.scope}` : ''), nonce: Date.now() });
           setIsAssistantOpen(true);

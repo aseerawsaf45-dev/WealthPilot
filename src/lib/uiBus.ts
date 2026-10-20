@@ -6,10 +6,12 @@
 export type UiEvent =
   | { type: 'navigate'; tab: string }
   | { type: 'filter-transactions'; query: string }
-  | { type: 'ask-assistant'; question: string; scope?: string };
+  | { type: 'ask-assistant'; question: string; scope?: string }
+  | { type: 'review-budget'; category: string };
 
 const NAME = 'wp:ui';
 let pendingFilter: string | null = null;
+let pendingBudgetReview: string | null = null;
 
 export function emitUi(e: UiEvent): void {
   if (typeof window === 'undefined') return;
@@ -17,6 +19,11 @@ export function emitUi(e: UiEvent): void {
     // Kept until the Transactions tab mounts and takes it.
     pendingFilter = e.query;
     window.dispatchEvent(new CustomEvent<UiEvent>(NAME, { detail: { type: 'navigate', tab: 'transactions' } }));
+  }
+  if (e.type === 'review-budget') {
+    // Kept until the Budgets tab mounts and takes it.
+    pendingBudgetReview = e.category;
+    window.dispatchEvent(new CustomEvent<UiEvent>(NAME, { detail: { type: 'navigate', tab: 'budgets' } }));
   }
   window.dispatchEvent(new CustomEvent<UiEvent>(NAME, { detail: e }));
 }
@@ -37,4 +44,16 @@ export function takePendingFilter(): string | null {
 /** Reads the pending filter without clearing it (safe in a state initializer). */
 export function peekPendingFilter(): string | null {
   return pendingFilter;
+}
+
+/** The Budgets tab calls this on mount to pick up a budget review requested from another page. */
+export function takePendingBudgetReview(): string | null {
+  const c = pendingBudgetReview;
+  pendingBudgetReview = null;
+  return c;
+}
+
+/** Reads the pending budget review without clearing it. */
+export function peekPendingBudgetReview(): string | null {
+  return pendingBudgetReview;
 }
