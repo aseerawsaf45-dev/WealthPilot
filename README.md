@@ -1,5 +1,32 @@
 # WealthPilot
+<p align="center">
+  <img src="assets/wealthpilot.png"
+       alt="WealthPilot Logo"
+       width="180">
+</p>
 
+<h1 align="center">WealthPilot</h1>
+
+<p align="center">
+  A Personal Finance and Wealth Management Workspace
+</p>
+
+<p align="center">
+  Built for the Shenzhen International FinTech Competition 2026
+</p>
+
+<p align="center">
+  <a href="https://darkslategray-duck-848813.hostingersite.com/">
+    <img src="https://img.shields.io/badge/Live_Website-Visit-1677FF?style=flat"
+         alt="Live Website">
+  </a>
+  <a href="https://github.com/aseerawsaf45-dev/WealthPilot">
+    <img src="https://img.shields.io/badge/GitHub-Source_Code-24292F?style=flat&logo=github"
+         alt="GitHub Repository">
+  </a>
+</p>
+
+---
 **A personal finance workspace with exact money, a grounded AI copilot, a debt and wealth planner, and location-aware partner offers.**
 Built for the Shenzhen International FinTech Competition 2026.
 
