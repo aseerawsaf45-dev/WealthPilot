@@ -479,17 +479,17 @@ export function LearnTab() {
             <div className="flex items-center gap-2 mb-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-xs shadow-emerald-500/50 animate-pulse" />
               <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-500">
-                Self-Finance Academy • Daily Mastery
+                FinanceGuru • Daily Financial Mastery
               </span>
               <span className="text-[10px] font-mono text-sky-800 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200 font-semibold">
                 Interactive Learning & Q&A
               </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-[#0F172A] tracking-tight">
-              Financial Literacy & Wealth IQ
+              FinanceGuru
             </h1>
             <p className="text-xs sm:text-sm text-slate-600 font-medium mt-1">
-              Read curated practical financial guides, answer scenario checks, and earn daily XP & streak rewards.
+              Your interactive financial literacy mentor: explore practical guides, test scenarios, and earn daily XP & streak rewards.
             </p>
           </div>
 

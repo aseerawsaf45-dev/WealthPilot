@@ -15,6 +15,7 @@ import { ImportTab } from '../components/ImportTab';
 import { CopilotTab } from '../components/CopilotTab';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { SettingsTab } from '../components/SettingsTab';
+import { AdminTab } from '../components/AdminTab';
 import { LandingPage } from '../components/LandingPage';
 import { AuthModal } from '../components/AuthModal';
 import { dollarsToCents } from '../lib/money';
@@ -33,7 +34,7 @@ import {
   Globe,
 } from 'lucide-react';
 
-const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'];
+const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings', 'admin'];
 
 function WealthPilotApp() {
   const [viewMode, setViewMode] = useState<'landing' | 'app'>('landing');
@@ -289,6 +290,7 @@ function WealthPilotApp() {
             {activeTab === 'copilot' && <CopilotTab onNavigate={setActiveTab} onOpenQuickAdd={() => setIsQuickAddOpen(true)} />}
             {activeTab === 'import' && <ImportTab />}
             {activeTab === 'settings' && <SettingsTab />}
+            {activeTab === 'admin' && <AdminTab />}
           </TabTransition>
         )}
       </main>

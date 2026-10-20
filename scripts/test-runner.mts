@@ -1407,3 +1407,31 @@ describe('Loans: borrowing room, calculator maths and bank lists', async () => {
     assert.ok(!/\d/.test(out.template.replace(/\{\{#\d+\}\}/g, '')), 'no digits outside placeholders');
   });
 });
+
+describe('Partner offers: input rules, distance, copilot facts', async () => {
+  const S = await import('../src/server/schemas.ts');
+  const G = await import('../src/lib/geo.ts');
+  const T = await import('../src/server/ai/tools.ts');
+  const ok = { partnerId: 'p1', kind: 'discount', title: 'Coffee', description: '', country: 'BD', termsUrl: 'https://example.com/terms', validFrom: '2026-10-01', validUntil: '2026-12-31' };
+  it('accepts a valid offer and rejects http links, reversed dates and bad coordinates', () => {
+    assert.ok(S.OfferInput.safeParse(ok).success);
+    assert.ok(!S.OfferInput.safeParse({ ...ok, termsUrl: 'http://example.com' }).success, 'https only');
+    assert.ok(!S.OfferInput.safeParse({ ...ok, termsUrl: 'javascript:alert(1)' }).success);
+    assert.ok(!S.OfferInput.safeParse({ ...ok, validUntil: '2026-09-01' }).success, 'ends after it starts');
+    assert.ok(!S.OfferInput.safeParse({ ...ok, locations: [{ label: 'x', lat: 91, lng: 0 }] }).success);
+    assert.ok(!S.OfferInput.safeParse({ ...ok, country: 'ZZ' }).success);
+  });
+  it('measures distance on the globe', () => {
+    const km = G.distanceKm({ lat: 23.8103, lng: 90.4125 }, { lat: 22.3569, lng: 91.7832 }); // Dhaka → Chattogram
+    assert.ok(Math.abs(km - 216) < 3, `${km}`);
+    assert.strictEqual(G.formatKm(0.4), '400 m away');
+    assert.strictEqual(G.formatKm(3.25), '3.3 km away');
+  });
+  it('the copilot only counts partner offers (no names, no digits in the template)', () => {
+    const data = { currency: 'BDT', today: '2026-10-20', region: 'BD', transactions: [], budgets: [], goals: [], bills: [], debts: [], partnerOffers: [{ kind: 'discount' }, { kind: 'discount' }, { kind: 'investment' }] } as never;
+    const out = T.runTool('get_partner_offers', {}, data);
+    assert.deepStrictEqual(out.facts.map((f) => f.value), [2, 1]);
+    assert.ok(!/\d/.test(out.template.replace(/\{\{#\d+\}\}/g, '')));
+    assert.ok(out.limitations[0].includes('not recommendations'));
+  });
+});

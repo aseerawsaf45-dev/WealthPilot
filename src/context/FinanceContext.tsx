@@ -59,6 +59,7 @@ interface Bootstrap {
   fx?: FxRates | null;
   investments?: InvestmentPlan[];
   loanOffers?: LoanOffer[];
+  isAdmin?: boolean;
 }
 
 interface FinanceContextType {
@@ -74,6 +75,8 @@ interface FinanceContextType {
   fx: FxRates | null;
   investments: InvestmentPlan[];
   loanOffers: LoanOffer[];
+  /** Server-decided (ADMIN_EMAILS); only shows the Admin tab, every admin API re-checks it. */
+  isAdmin: boolean;
   saveInvestmentPlan: (plan: Omit<InvestmentPlan, 'id' | 'updatedAt'>, id?: string) => Promise<InvestmentPlan | undefined>;
   deleteInvestmentPlan: (id: string) => Promise<void>;
   saveLoanOffer: (offer: Omit<LoanOffer, 'id' | 'updatedAt' | 'status' | 'debtId'>, id?: string) => Promise<LoanOffer | undefined>;
@@ -189,6 +192,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [fx, setFx] = useState<FxRates | null>(null);
   const [investments, setInvestments] = useState<InvestmentPlan[]>([]);
   const [loanOffers, setLoanOffers] = useState<LoanOffer[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
   const macroCache = useRef(new Map<string, Promise<CountryMacroData | null>>());
 
   // Every formatMoney() call without an explicit currency shows the user's base currency.
@@ -217,6 +221,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (data.fx !== undefined) setFx(data.fx);
     setInvestments(data.investments ?? []);
     setLoanOffers(data.loanOffers ?? []);
+    setIsAdmin(!!data.isAdmin);
     setPreferencesState({ ...defaultPreferences, ...data.preferences, isAuthenticated: true });
   };
 
@@ -235,6 +240,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setFx(null);
     setInvestments([]);
     setLoanOffers([]);
+    setIsAdmin(false);
     setCopilotHistory([welcomeMessage]);
     chatHistory.resetChats();
     setPreferencesState({ ...defaultPreferences, isAuthenticated: false });
@@ -882,6 +888,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         fx,
         investments,
         loanOffers,
+        isAdmin,
         saveInvestmentPlan,
         deleteInvestmentPlan,
         saveLoanOffer,

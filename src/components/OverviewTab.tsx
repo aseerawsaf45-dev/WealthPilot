@@ -11,6 +11,7 @@ import { convertMinor } from '../lib/fx';
 import { emitUi } from '../lib/uiBus';
 import { CashFlowRhythmChart } from './InteractiveCharts';
 import { PageInsights } from './PageInsights';
+import { NearbyOffers } from './NearbyOffers';
 import { VERDICT_STYLE } from './GoalPlanDialog';
 import { AnimatedNumber } from './motion/AnimatedNumber';
 import {
@@ -507,6 +508,8 @@ export function OverviewTab({ setActiveTab, openAddTxModal }: OverviewTabProps) 
         </div>
       </section>
 
+      <NearbyOffers />
+
       {/* Learn */}
       <section className="keel-card p-6 sm:p-8 bg-gradient-to-br from-amber-500/[0.06] via-white to-sky-500/[0.05] border border-amber-200/80 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-start gap-4">
@@ -515,7 +518,7 @@ export function OverviewTab({ setActiveTab, openAddTxModal }: OverviewTabProps) 
           </div>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-bold text-amber-800 uppercase tracking-wider bg-amber-100/80 px-2.5 py-0.5 rounded-full">Learn</span>
+              <span className="text-xs font-bold text-amber-800 uppercase tracking-wider bg-amber-100/80 px-2.5 py-0.5 rounded-full">FinanceGuru</span>
               <span className="text-[10px] font-mono font-bold bg-sky-50 text-sky-800 px-2 py-0.5 rounded-full border border-sky-200">
                 {learn ? `${learn.xp} XP · ${learn.streak}-day streak · ${learn.completed.length} done` : 'Start your first module'}
               </span>
@@ -528,7 +531,7 @@ export function OverviewTab({ setActiveTab, openAddTxModal }: OverviewTabProps) 
         </div>
         <button onClick={() => setActiveTab('learn')} className="btn-primary-anim bg-[#0F172A] hover:bg-black text-white px-6 py-3 rounded-full text-xs font-bold inline-flex items-center gap-2 cursor-pointer shadow-lg shrink-0">
           <GraduationCap className="w-4 h-4 text-sky-400" />
-          <span>Open Learn</span>
+          <span>Open FinanceGuru</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </section>

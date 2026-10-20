@@ -250,3 +250,48 @@ describe('platform: rate limit, audit chain, session revocation', () => {
     assert.ok(dead instanceof Response && dead.status === 401);
   });
 });
+
+describe('partner offers: visibility rules, admin guard, anonymous counts', () => {
+  it('shows only live, current, recently verified offers of the requested country', async () => {
+    const offers = await import('../src/server/repos/offers.ts');
+    const partner = await offers.createPartner(userA, { name: `itest partner ${tag}`, website: null, relationship: 'sponsor', contractEnds: null });
+    const base = { partnerId: partner.id, kind: 'discount' as const, title: 'Coffee', description: 'x', discountBps: 1000, country: 'BD', termsUrl: 'https://example.com/t', actionUrl: null, validFrom: '2026-01-01', validUntil: '2099-01-01', verified: true, isSample: false, status: 'live' as const, locations: [{ label: 'Gulshan', lat: 23.79, lng: 90.41 }] };
+    const live = await offers.createOffer(userA, base);
+    const expired = await offers.createOffer(userA, { ...base, title: 'old', validFrom: '2020-01-01', validUntil: '2021-01-01' });
+    const paused = await offers.createOffer(userA, { ...base, title: 'paused', status: 'paused' });
+    const unverified = await offers.createOffer(userA, { ...base, title: 'unchecked', verified: false });
+    const elsewhere = await offers.createOffer(userA, { ...base, title: 'us', country: 'US' });
+    try {
+      const ids = (await offers.listLiveOffers('BD')).map((o) => o.id);
+      assert.ok(ids.includes(live.id));
+      for (const o of [expired, paused, unverified, elsewhere]) assert.ok(!ids.includes(o.id), `${o.title} hidden`);
+      assert.deepStrictEqual((await offers.listLiveOffers('BD')).find((o) => o.id === live.id)?.locations, [{ label: 'Gulshan', lat: 23.79, lng: 90.41 }]);
+
+      // Two clicks at the same time both count; events on hidden offers are ignored.
+      await Promise.all([offers.countEvent(live.id, 'click'), offers.countEvent(live.id, 'click'), offers.countEvent(live.id, 'view')]);
+      await offers.countEvent(paused.id, 'click');
+      const stats = await offers.offerStats(1);
+      assert.deepStrictEqual(stats.rows.find((r) => r.offerId === live.id), { offerId: live.id, views: 1, clicks: 2 });
+      assert.ok(!stats.rows.some((r) => r.offerId === paused.id));
+    } finally {
+      await prisma.partner.delete({ where: { id: partner.id } }); // cascades offers, locations, stats
+    }
+  });
+
+  it('lets only ADMIN_EMAILS use the admin API', async () => {
+    const { adminOnly } = await import('../src/server/http.ts');
+    const handler = adminOnly(async () => new Response('ok'));
+    const emailA = (await prisma.user.findUniqueOrThrow({ where: { id: userA }, select: { email: true } })).email;
+    const cookie = (await startSession(userB)).split(';')[0];
+    const call = () => handler(new Request('http://localhost/api/v1/admin/offers', { headers: { cookie } }) as never, undefined as never);
+    const before = process.env.ADMIN_EMAILS;
+    process.env.ADMIN_EMAILS = emailA;
+    try {
+      assert.strictEqual((await call()).status, 403, 'user B is not an admin');
+      process.env.ADMIN_EMAILS = `${emailA}, ${(await prisma.user.findUniqueOrThrow({ where: { id: userB }, select: { email: true } })).email.toUpperCase()}`;
+      assert.strictEqual((await call()).status, 200, 'listed (case-insensitive) → allowed');
+    } finally {
+      process.env.ADMIN_EMAILS = before;
+    }
+  });
+});

@@ -161,3 +161,18 @@ export function authed<C = unknown>(fn: (request: NextRequest, session: AuthedSe
 }
 
 export type IdContext = { params: Promise<{ id: string }> };
+
+/** Admins are listed in the ADMIN_EMAILS env variable (comma-separated); nothing the client sends can grant it. */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  const list = (process.env.ADMIN_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return !!email && list.includes(email.toLowerCase());
+}
+
+/** authed() + the session user must be an admin (403 otherwise). */
+export function adminOnly<C = unknown>(fn: (request: NextRequest, session: AuthedSession, ctx: C) => Promise<Response>): Handler<C> {
+  return authed<C>(async (request, session, ctx) => {
+    const user = await prisma.user.findUnique({ where: { id: session.userId }, select: { email: true } });
+    if (!isAdminEmail(user?.email)) return fail('FORBIDDEN', 'Admins only.', 403);
+    return fn(request, session, ctx);
+  });
+}

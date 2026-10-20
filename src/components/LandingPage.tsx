@@ -68,7 +68,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
     },
     {
       q: 'Is WealthPilot free to use?',
-      a: 'WealthPilot is an open, private personal wellness workspace. You do not need to connect your real bank logins or hand over banking passwords to third-party data aggregators. You can start immediately with verified demo data or fresh clean books.',
+      a: 'WealthPilot offers a comprehensive free core ledger with on-device statement parsing, multi-currency accounting, and verified privacy. You do not need to connect bank logins or hand over banking credentials to third-party aggregators. Start immediately with verified demo data or fresh books.',
     },
   ];
 
@@ -201,7 +201,11 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
           </div>
           <div className="flex items-center gap-1.5">
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Works 100% offline</span>
+            <span>Receipts read on your device</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>AI never sees amounts</span>
           </div>
         </div>
 
@@ -562,17 +566,17 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
             </div>
           </div>
 
-          {/* Card 4: Self-Finance Learning Academy (Col Span 2) */}
+          {/* Card 4: FinanceGuru Learning Section (Col Span 2) */}
           <div className="md:col-span-2 keel-card p-8 flex flex-col justify-between hover:shadow-lg transition-all">
             <div>
               <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 mb-5 shadow-2xs">
                 <GraduationCap className="w-5 h-5" />
               </div>
               <h3 className="text-xl font-bold text-[#0F172A] tracking-tight mb-2">
-                Interactive Finance Academy & Streak XP
+                FinanceGuru: Interactive Literacy &amp; Streak XP
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                Master wealth building through bite-sized interactive case studies, live runway calculators, and practical scenario Q&A. Earn XP, maintain your daily learning streak, and advance from Novice Capitalist to Sovereign Allocator.
+                Master wealth building with FinanceGuru: bite-sized interactive case studies, live runway calculators, and practical scenario Q&amp;A. Earn XP, maintain your daily learning streak, and advance from Novice Capitalist to Sovereign Allocator.
               </p>
             </div>
             <div className="mt-6 flex items-center gap-3">
@@ -604,16 +608,17 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full min-w-[720px] text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-200">
-                  <th className="py-4 px-4 font-bold text-slate-400 uppercase tracking-wider">
-                    Feature & Safety Capability
+                  <th className="py-4 px-4 font-bold text-slate-400 uppercase tracking-wider w-1/4">
+                    Feature &amp; Safety Capability
                   </th>
                   <th className="py-4 px-4 font-extrabold text-sky-700 bg-sky-50/70 rounded-t-xl">
                     WealthPilot
                   </th>
-                  <th className="py-4 px-4 font-bold text-slate-600">Copilot / Mint</th>
+                  <th className="py-4 px-4 font-bold text-slate-600">Pocket Clear</th>
+                  <th className="py-4 px-4 font-bold text-slate-600">Copilot / Monarch</th>
                   <th className="py-4 px-4 font-bold text-slate-600">YNAB</th>
                   <th className="py-4 px-4 font-bold text-slate-600">Excel / Sheets</th>
                 </tr>
@@ -624,55 +629,72 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
                     Receipts &amp; statements read on your device
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
-                    ✓ Files never uploaded
+                    ✓ Files never leave browser
                   </td>
-                  <td className="py-3.5 px-4 text-slate-400">Varies</td>
-                  <td className="py-3.5 px-4 text-slate-400">Varies</td>
-                  <td className="py-3.5 px-4 text-slate-400">Manual entry</td>
+                  <td className="py-3.5 px-4 text-emerald-600">✓ On-device parsing</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Cloud processing</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Cloud processing</td>
+                  <td className="py-3.5 px-4 text-slate-400">Manual entry only</td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
                     Discrete Minor-Unit Integer Math
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
-                    ✓ Zero float drift
+                    ✓ Zero float drift (BigInt cents)
                   </td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Floating point math</td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Standard decimals</td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Floating point errors</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Floating point decimals</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Floating point decimals</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Floating point decimals</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ IEEE-754 float drift</td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
-                    No Forced Bank Credential Sharing
+                    No Bank Passwords or Aggregator Lock-in
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
-                    ✓ Never requested
+                    ✓ Never requested (bKash &amp; global)
                   </td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Forced Plaid OAuth</td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Plaid / MX required</td>
-                  <td className="py-3.5 px-4 text-emerald-600">✓ Manual</td>
+                  <td className="py-3.5 px-4 text-emerald-600">✓ Aggregator-free (manual &amp; SMS)</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Aggregator-centric (Plaid/MX; US/CA)</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Aggregator-centric (Plaid/MX primary)</td>
+                  <td className="py-3.5 px-4 text-emerald-600">✓ Manual entry</td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
                     Formula-Injection Neutralized CSV
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
-                    ✓ Sanitized `=,+,-,@`
+                    ✓ Sanitized `=,+,-,@` prefixes
                   </td>
-                  <td className="py-3.5 px-4 text-slate-400">Basic CSV</td>
-                  <td className="py-3.5 px-4 text-slate-400">Basic CSV</td>
-                  <td className="py-3.5 px-4 text-rose-500">✗ Vulnerable</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Paywalled export (Pro required)</td>
+                  <td className="py-3.5 px-4 text-slate-400">Basic CSV (unshielded)</td>
+                  <td className="py-3.5 px-4 text-slate-400">Basic CSV (unshielded)</td>
+                  <td className="py-3.5 px-4 text-rose-500">✗ Vulnerable to DDE injection</td>
                 </tr>
                 <tr>
                   <td className="py-3.5 px-4 font-bold text-slate-800">
-                    Interactive Finance Academy & Streaks
+                    FinanceGuru Interactive Academy &amp; Streaks
+                  </td>
+                  <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700">
+                    ✓ Built-in XP &amp; Q&amp;A
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ None (expense logging only)</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ None (dashboard only)</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ Video/article content only</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ None</td>
+                </tr>
+                <tr>
+                  <td className="py-3.5 px-4 font-bold text-slate-800">
+                    Debt Payoff &amp; Investment Simulation
                   </td>
                   <td className="py-3.5 px-4 bg-sky-50/70 font-bold text-emerald-700 rounded-b-xl">
-                    ✓ Built-in XP & Q&A
+                    ✓ Snowball/Avalanche + World Bank rates
                   </td>
-                  <td className="py-3.5 px-4 text-slate-400">✗ None</td>
-                  <td className="py-3.5 px-4 text-slate-400">✗ Videos only</td>
-                  <td className="py-3.5 px-4 text-slate-400">✗ None</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ None (expense logging only)</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ Net worth chart only</td>
+                  <td className="py-3.5 px-4 text-slate-400">✗ Basic loan tracker</td>
+                  <td className="py-3.5 px-4 text-slate-400">Manual complex modeling</td>
                 </tr>
               </tbody>
             </table>
@@ -760,7 +782,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
               Take command of your financial ledger today.
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 font-medium max-w-xl mx-auto leading-relaxed">
-              No subscription paywalls. No remote database tracking. Join thousands of pilots piloting their net worth with mathematical sovereignty.
+              Free core ledger. Receipts are read on your device, and AI never sees amounts. Pilot your net worth with mathematical sovereignty.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-2">
@@ -817,7 +839,7 @@ export function LandingPage({ onOpenAuth, onLaunchApp }: LandingPageProps) {
           </div>
 
           <div className="text-[11px] text-slate-400 text-center md:text-right">
-            Personal wellness and calculation tool • Zero remote telemetry
+            Personal finance &amp; calculation engine • Encrypted ledger • Zero tracking ads
           </div>
         </div>
       </footer>

@@ -23,7 +23,7 @@ export const SEGMENTS = [
   { id: 'planning', label: 'Planning', examples: ['Compare debt payoff options', 'Should I pay off debt or invest?', 'open planning'] },
   { id: 'loans', label: 'Loans', examples: ['Compare my loan offers', 'Can I afford a loan?', 'open planning'] },
   { id: 'invest', label: 'Invest', examples: ['How is my investment outlook?', 'What do inflation and politics mean for my plan?', 'open planning'] },
-  { id: 'learn', label: 'Learn', examples: ['What should I learn first?', 'How many months of cash do I have?', 'open learn'] },
+  { id: 'learn', label: 'FinanceGuru', examples: ['What should I learn first?', 'How many months of cash do I have?', 'open financeguru'] },
   { id: 'import', label: 'Import', examples: ['open import', 'Scan for duplicate charges', 'How much did I spend this month?'] },
   { id: 'settings', label: 'Settings', examples: ['change my currency to BDT', 'turn on reduced motion', 'open settings'] },
 ] as const;

@@ -283,3 +283,23 @@ export interface LoanOffer {
   debtId: string | null;
   updatedAt: string;
 }
+
+/** A partner's discount or investment opportunity (from organisations with a partnership, sponsorship or ad deal). */
+export interface PartnerOffer {
+  id: string;
+  kind: 'discount' | 'investment';
+  title: string;
+  description: string;
+  discountBps: number | null;
+  country: string;
+  termsUrl: string;
+  actionUrl: string | null;
+  validFrom: string; // YYYY-MM-DD
+  validUntil: string; // YYYY-MM-DD
+  lastVerifiedAt: string;
+  isSample: boolean;
+  status: 'draft' | 'live' | 'paused';
+  partnerId: string;
+  partner: { name: string; website: string | null; relationship: 'partner' | 'sponsor' | 'advertiser' };
+  locations: Array<{ label: string; lat: number; lng: number }>;
+}

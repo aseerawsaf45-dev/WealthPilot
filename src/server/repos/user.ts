@@ -6,7 +6,7 @@ import type { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { writeAudit, pepperHash } from '../audit';
-import { HttpError } from '../http';
+import { HttpError, isAdminEmail } from '../http';
 import { toClientAudit, todayIn } from '../mappers';
 import { PreferencesPatch } from '../schemas';
 import { comparePassword } from '@/lib/auth/password';
@@ -54,7 +54,7 @@ function toClientPreferences(user: ProfileRow): Partial<UserPreferences> & { reg
 export async function getProfile(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: profileSelect });
   if (!user) throw new HttpError('UNAUTHORIZED', 'Please sign in.', 401);
-  return { timezone: user.timezone, preferences: toClientPreferences(user) };
+  return { timezone: user.timezone, preferences: toClientPreferences(user), isAdmin: isAdminEmail(user.email) };
 }
 
 export async function updatePreferences(userId: string, patch: z.infer<typeof PreferencesPatch>) {

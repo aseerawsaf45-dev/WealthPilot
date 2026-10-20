@@ -21,7 +21,7 @@ import { GOAL_INTENT, type SegmentId } from '@/lib/assistant';
 export { looksLikeCommand } from '@/lib/assistant';
 
 export const TABS = ['overview', 'transactions', 'accounts', 'budgets', 'goals', 'bills', 'planning', 'learn', 'copilot', 'import', 'settings'] as const;
-const TAB_ALIASES: Record<string, (typeof TABS)[number]> = { home: 'overview', dashboard: 'overview', debts: 'planning', debt: 'planning', planner: 'planning', loans: 'planning', loan: 'planning', invest: 'planning', investments: 'planning', privacy: 'settings', assistant: 'copilot', chat: 'copilot' };
+const TAB_ALIASES: Record<string, (typeof TABS)[number]> = { home: 'overview', dashboard: 'overview', debts: 'planning', debt: 'planning', planner: 'planning', loans: 'planning', loan: 'planning', invest: 'planning', investments: 'planning', privacy: 'settings', assistant: 'copilot', chat: 'copilot', financeguru: 'learn', 'finance guru': 'learn', academy: 'learn' };
 
 /** A command waiting for its amount: sent back by the client with the user's answer (re-validated like any call). */
 export interface PendingCommand {
@@ -787,7 +787,7 @@ const DEBT_CMDS = ['add_debt', 'update_debt', 'delete_debt'];
 
 /** What each segment offers the model (navigate is always allowed) and the calculation its overview shows. */
 export const SEGMENT_TOOLS: Record<SegmentId, { read: string[]; commands: string[]; overview?: (today: string) => ToolCall }> = {
-  overview: { read: ['get_insights', 'get_financial_summary', 'get_category_breakdown', 'compare_periods'], commands: COMMANDS.map((c) => c.name), overview: monthToDate },
+  overview: { read: ['get_insights', 'get_financial_summary', 'get_category_breakdown', 'compare_periods', 'get_partner_offers'], commands: COMMANDS.map((c) => c.name), overview: monthToDate },
   transactions: { read: ['get_insights', 'get_financial_summary', 'get_category_breakdown', 'compare_periods', 'find_possible_duplicates'], commands: ['add_transaction', 'recategorize_transaction', 'delete_transaction', 'open_quick_add'], overview: monthToDate },
   accounts: { read: ['get_insights', 'get_financial_summary'], commands: ['add_account', 'rename_account', 'delete_account'], overview: () => ({ name: 'get_insights', args: {} }) },
   budgets: { read: ['get_budget_status', 'get_category_breakdown'], commands: ['set_budget', 'delete_budget'], overview: (t) => ({ name: 'get_budget_status', args: { month: t.slice(0, 7) } }) },

@@ -442,3 +442,68 @@ model ExternalCache {
 
   @@map("external_cache")
 }
+
+// Organisations with a partnership, sponsorship or advertising deal (managed by admins; not user data).
+model Partner {
+  id           String    @id @default(cuid())
+  name         String
+  website      String?
+  relationship String // partner | sponsor | advertiser (shown on every offer card)
+  contractEnds DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  offers       Offer[]
+
+  @@map("partners")
+}
+
+// A partner's discount or investment opportunity in one country. OFR-01.
+model Offer {
+  id             String          @id @default(cuid())
+  partnerId      String
+  partner        Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  kind           String // discount | investment
+  title          String
+  description    String
+  discountBps    Int? // 1500 = 15% off
+  country        String // ISO-3166 alpha-2
+  termsUrl       String
+  actionUrl      String?
+  validFrom      DateTime
+  validUntil     DateTime
+  lastVerifiedAt DateTime
+  isSample       Boolean         @default(false) // demo content, shown with a "Sample" badge
+  status         String          @default("draft") // draft | live | paused
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  locations      OfferLocation[]
+  stats          OfferStat[]
+
+  @@index([country, status, validUntil])
+  @@map("offers")
+}
+
+// Where an offer can be used in person. Online-only offers have none.
+model OfferLocation {
+  id      String @id @default(cuid())
+  offerId String
+  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  label   String
+  lat     Float
+  lng     Float
+
+  @@index([offerId])
+  @@map("offer_locations")
+}
+
+// Anonymous daily counts for sponsor reports: no user id, no location.
+model OfferStat {
+  offerId String
+  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  day     String // YYYY-MM-DD (UTC)
+  views   Int    @default(0)
+  clicks  Int    @default(0)
+
+  @@id([offerId, day])
+  @@map("offer_stats")
+}

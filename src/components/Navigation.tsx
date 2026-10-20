@@ -30,6 +30,7 @@ import {
   Cloud,
   Loader2,
   AlertTriangle,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface NavigationProps {
@@ -47,7 +48,7 @@ export function Navigation({
   onOpenLanding,
   onOpenAuth,
 }: NavigationProps) {
-  const { preferences, logout, bills, budgets, isSaving } = useFinance();
+  const { preferences, logout, bills, budgets, isSaving, isAdmin } = useFinance();
   const displayName = preferences?.userName?.trim() || 'User';
   const displayEmail = preferences?.userEmail?.trim() || 'aseer@wealthpilot.app';
   const isSignedIn = preferences.isAuthenticated === true;
@@ -156,11 +157,12 @@ export function Navigation({
     { id: 'bills', label: 'Bills', icon: CalendarDays },
     { id: 'planning', label: 'Planner', icon: TrendingDown },
     { id: 'copilot', label: 'Copilot', icon: Sparkles },
-    { id: 'learn', label: 'Learn', icon: GraduationCap, badge: 'XP' },
+    { id: 'learn', label: 'FinanceGuru', icon: GraduationCap, badge: 'XP' },
     { id: 'import', label: 'Import', icon: Upload },
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin', icon: ShieldCheck }] : []),
   ];
 
-  const MORE_IDS = ['planning', 'learn', 'import'];
+  const MORE_IDS = ['planning', 'learn', 'import', 'admin'];
   const inlineItems = navItems.filter((i) => !MORE_IDS.includes(i.id));
   const moreItems = navItems.filter((i) => MORE_IDS.includes(i.id));
   const activeMore = moreItems.find((i) => i.id === activeTab);
@@ -628,7 +630,7 @@ export function Navigation({
           { id: 'transactions', label: 'Ledger', icon: Receipt },
           { id: 'budgets', label: 'Budgets', icon: PieChart },
           { id: 'goals', label: 'Goals', icon: Target },
-          { id: 'learn', label: 'Learn', icon: GraduationCap },
+          { id: 'learn', label: 'FinanceGuru', icon: GraduationCap },
         ].map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;

@@ -27,5 +27,5 @@ export const GET = authed(async (_request, { userId }) => {
     listPlans(userId),
     listOffers(userId),
   ]);
-  return ok({ preferences: profile.preferences, today, accounts, transactions, budgets, goals, bills, debts, auditLogs, fx, investments, loanOffers });
+  return ok({ preferences: profile.preferences, isAdmin: profile.isAdmin, today, accounts, transactions, budgets, goals, bills, debts, auditLogs, fx, investments, loanOffers });
 });

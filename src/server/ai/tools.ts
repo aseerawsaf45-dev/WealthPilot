@@ -49,6 +49,8 @@ export interface FinanceData {
   region?: string | null;
   /** Market history of the fund universe (for building mixes in commands). */
   markets?: InstrumentStats[];
+  /** Live partner offers in the user's country (kind only). */
+  partnerOffers?: Array<{ kind: 'discount' | 'investment' }>;
   /** Set when foreign-currency rows were converted to `currency` (totals become estimates). */
   fxNote?: string;
 }
@@ -811,6 +813,24 @@ function loansTool(_args: Record<string, never>, data: FinanceData): ToolOutput 
   return { period: null, facts, template: parts.join('; ') + '.', limitations: ['Loan costs assume fixed rates and on-time payments.'], actions: [] };
 }
 
+function partnerOffersTool(_args: Record<string, never>, data: FinanceData): ToolOutput {
+  const offers = data.partnerOffers ?? [];
+  const facts: FactDraft[] = [];
+  const add = (f: FactDraft) => facts.push(f) - 1;
+  const where = data.region && data.region !== 'EU' ? countryName(data.region) : null;
+  if (!where) return { period: null, facts, template: 'Set your country in Settings to see partner offers near you on the Overview page.', limitations: [], actions: [] };
+  if (!offers.length) return { period: null, facts, template: `There are no partner offers in ${where} right now.`, limitations: [], actions: [] };
+  const d = add(count('Partner discounts in your country', offers.filter((o) => o.kind === 'discount').length));
+  const i = add(count('Partner investment opportunities in your country', offers.filter((o) => o.kind === 'investment').length));
+  return {
+    period: null,
+    facts,
+    template: `In ${where} there are {{#${d}}} partner discounts and {{#${i}}} partner investment opportunities; see them under "Near you" on the Overview page, sorted by distance if you turn on location.`,
+    limitations: ['Partner offers come from organisations that partner with, sponsor or advertise on WealthPilot; they are not recommendations.'],
+    actions: [],
+  };
+}
+
 function averageIncome(data: FinanceData): number {
   const thisMonth = data.today.slice(0, 7);
   let total = 0;
@@ -911,6 +931,7 @@ export const TOOLS: ToolDef[] = [
   },
   { name: 'get_debt_summary', description: 'Number of debts, total balance, total minimum payments and the highest-interest debt.', args: empty, llm: true, run: debtSummary as ToolDef['run'] },
   { name: 'find_possible_duplicates', description: 'Possible duplicate charges in the last 90 days.', args: empty, llm: false, run: possibleDuplicates as ToolDef['run'] },
+  { name: 'get_partner_offers', description: 'How many partner discounts and investment opportunities (from organisations that partner with or sponsor WealthPilot) exist in the country of the user. Not advice.', args: empty, llm: true, run: partnerOffersTool as ToolDef['run'] },
   {
     name: 'compare_loans',
     description: 'Compare the loan offers the user is considering: cheapest total cost, monthly payment, real rate with fees, and affordability (share of income to debt).',

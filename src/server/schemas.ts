@@ -273,3 +273,32 @@ export const LoanOfferInput = z.object({
 });
 export const LoanOfferPatch = LoanOfferInput.partial();
 export const TakeLoanInput = z.object({ dueDateDay: z.number().int().min(1).max(31) });
+
+// ---- Partner offers (admin-managed; shown to users near them) ------------------------
+const httpsUrl = z.url({ protocol: /^https$/, message: 'Use an https:// link' }).max(500);
+export const PartnerInput = z.object({
+  name: text(80),
+  website: httpsUrl.nullable().default(null),
+  relationship: z.enum(['partner', 'sponsor', 'advertiser']),
+  contractEnds: ymd.nullable().default(null),
+});
+export const OfferLocationInput = z.object({ label: text(80), lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) });
+export const OfferInput = z
+  .object({
+    partnerId: id,
+    kind: z.enum(['discount', 'investment']),
+    title: noPan(80).pipe(z.string().min(1)),
+    description: noPan(300),
+    discountBps: z.number().int().min(1).max(10_000).nullable().default(null),
+    country,
+    termsUrl: httpsUrl,
+    actionUrl: httpsUrl.nullable().default(null),
+    validFrom: ymd,
+    validUntil: ymd,
+    verified: z.boolean().default(false), // true = "checked today" → lastVerifiedAt = now
+    isSample: z.boolean().default(false),
+    status: z.enum(['draft', 'live', 'paused']).default('draft'),
+    locations: z.array(OfferLocationInput).max(20).default([]),
+  })
+  .refine((o) => o.validUntil > o.validFrom, { message: 'The end date must be after the start date', path: ['validUntil'] });
+export const OfferEvent = z.object({ type: z.enum(['view', 'click']) });

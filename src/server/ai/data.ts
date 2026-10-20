@@ -12,6 +12,7 @@ import { listAccounts } from '../repos/ledger';
 import { listPlans, listOffers } from '../repos/wealth';
 import { getCountryMacro } from '../repos/macro';
 import { getMarketStats } from '../repos/markets';
+import { listLiveOffers } from '../repos/offers';
 import { convertMinor } from '@/lib/fx';
 
 export async function loadCopilotContext(userId: string): Promise<{ consent: AiConsentState; data: FinanceData }> {
@@ -42,7 +43,12 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
   ]);
   // Public country data for the user's plans (and their region), for the investment tools.
   const countries = [...new Set([...investments.map((p) => p.country), ...(user.region && user.region !== 'EU' ? [user.region] : [])])].slice(0, 5);
-  const macro = Object.fromEntries(await Promise.all(countries.map(async (c) => [c, await getCountryMacro(c)] as const)));
+  const region = user.region && user.region !== 'EU' ? user.region : null;
+  const [macro, partnerOffers] = await Promise.all([
+    Promise.all(countries.map(async (c) => [c, await getCountryMacro(c)] as const)).then(Object.fromEntries),
+    // Kinds only: the model never sees partner names or links.
+    region ? listLiveOffers(region).then((o) => o.map((x) => ({ kind: x.kind }))).catch(() => []) : Promise.resolve([]),
+  ]);
 
   // Foreign-currency rows are converted to the preferred currency (an estimate, stated in every answer).
   // Rows with no rate keep their currency and are left out of category totals as before.
@@ -100,6 +106,7 @@ export async function loadCopilotContext(userId: string): Promise<{ consent: AiC
       loanOffers,
       macro,
       markets,
+      partnerOffers,
       region: user.region,
     },
   };
