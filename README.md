@@ -7,7 +7,7 @@
 <h1 align="center">WealthPilot</h1>
 
 <p align="center">
-  **A personal finance workspace with exact money, a grounded AI copilot, a debt and wealth planner, and location-aware partner offers.**
+  A personal finance workspace with exact money, a grounded AI copilot, a debt and wealth planner, and location-aware partner offers.
 </p>
 
 <p align="center">
