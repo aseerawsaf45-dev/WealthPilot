@@ -139,12 +139,16 @@ Competition submission. All rights reserved by the team unless stated otherwise.
 *Department of Industrial Engineering and Management*  
 Khulna University of Engineering & Technology (KUET), Bangladesh
 
-**Salman Farshi Alam**  
+**Gazi Faysal Jubayer**  
+*Department of Mechanical Engineering*  
+Khulna University of Engineering & Technology (KUET), Bangladesh
+
+**Aseer Awsaf**  
 *Department of Textile Engineering*  
 Khulna University of Engineering & Technology (KUET), Bangladesh
 
-**Gazi Faysal Jubayer**  
-*Department of Mechanical Engineering*  
+**Salman Farshi Alam**  
+*Department of Textile Engineering*  
 Khulna University of Engineering & Technology (KUET), Bangladesh
 
 **Sanjid Hasan**  
