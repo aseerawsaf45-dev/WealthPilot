@@ -32,7 +32,7 @@
 |---|---|
 | Live application | <!-- meta:liveUrl -->https://darkslategray-duck-848813.hostingersite.com/<!-- /meta --> |
 | Source code | https://github.com/aseerawsaf45-dev/WealthPilot |
-| Team | <!-- meta:team -->WealthPilot Team<!-- /meta --> |
+| Team | <!-- meta:team -->Team Joker<!-- /meta --> |
 | Documentation | [Technical documentation](docs/TECHNICAL_DOCUMENTATION.md) · [Deployment](docs/DEPLOYMENT.md) · [Test cases](docs/TEST_CASES.md) · [Sandbox operation logs](docs/SANDBOX_OPERATION_LOG.md) |
 | Word versions | [`submission/`](submission/) |
 
@@ -158,8 +158,7 @@ Details, threat model and known risks: [docs/TECHNICAL_DOCUMENTATION.md §4](doc
 
 Competition submission. All rights reserved by the team unless stated otherwise.
 
-## Team
-
+## Team Joker
 **Md. Rezwanur Rahman Utshaw**  
 *Department of Industrial Engineering and Management*  
 Khulna University of Engineering & Technology (KUET), Bangladesh
