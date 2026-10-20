@@ -1,6 +1,6 @@
 # WealthPilot
 <p align="center">
-  <img src="assets/wealthpilot.png"
+  <img src="public/favicon.png"
        alt="WealthPilot Logo"
        width="180">
 </p>
