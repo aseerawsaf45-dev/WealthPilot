@@ -132,3 +132,35 @@ Details, threat model and known risks: [docs/TECHNICAL_DOCUMENTATION.md §4](doc
 ## License
 
 Competition submission. All rights reserved by the team unless stated otherwise.
+
+## Team
+1. Md. Rezwanur Rahman Utshaw
+
+Department of Industrial Engineering and Management
+
+Khulna University of Engineering & Technology, Bangladesh
+
+2.Salman Farshi Alam 
+
+Department of Textile Engineering
+
+Khulna University of Engineering & Technology, Bangladesh
+3.Gazi Faysal Jubayer
+
+Department of Mechanical Engineering
+
+Khulna University of Engineering & Technology, Bangladesh
+4.Gazi Faysal Jubayer
+
+Department of Mechanical Engineering
+
+Khulna University of Engineering & Technology, Bangladesh
+5.Sanjid Hasan
+
+Department of Electrical and Electronic Engineering
+Gazi Faysal Jubayer
+
+Department of Mechanical Engineering
+
+Khulna University of Engineering & Technology, Bangladesh
+2.
